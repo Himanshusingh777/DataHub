@@ -441,15 +441,25 @@ jobs + runs + flows ──▶ /api/observability, /api/ai-ops/recommendations (r
 
 ---
 
-## 10. Production Readiness — assessed at documentation time (pre-verification)
+## 10. Production Readiness
 
-This score reflects reading the code, not yet re-running a full manual pass (that's §11/Task #29, tracked separately). It will be revised after that pass.
+## 11. Production Verification Pass — results
 
-**Estimated: 62/100.**
+Performed after this document's first draft: started the dev server, confirmed a clean boot (scheduler/workers/6-connector registry all initialize correctly), then walked every reachable screen as a real logged-in user, checking console errors and network responses at each step, then confirmed findings against a real `next build && next start` production server (not just dev/Fast Refresh, which can both mask and fake errors).
 
-- The backend engineering (job queue, ETL, BigQuery integration, workspace isolation, SQL safety, audit logging, encryption) is genuinely strong — this is not a demo. Every phase's live-browser verification found and fixed real bugs, which is a good sign the pattern of "verify before trusting" is working, not a sign the codebase is shaky.
-- The deductions are concentrated in three places, matching §7: (1) RBAC/Admin/Invite-team — a fully unenforced permission model in a multi-tenant product is the single largest gap; (2) connector robustness — no retry/backoff anywhere means production syncs will fail on any transient network blip; (3) AI Ops is currently mislabeled (rules engine, not AI) and has at least one hardcoded fake data array still in a "keep only real data" codebase.
-- Nothing found suggests a rewrite is needed anywhere — every gap above is additive work on a sound foundation, consistent with how every phase so far has gone.
+**What this pass could and couldn't cover:** it exercises the app's own logic, error handling, empty states, and UI end-to-end using this app's real database and real code paths. It could **not** exercise live third-party connector calls (Shopify/HubSpot/Stripe/a real Postgres/real BigQuery) since no live credentials for those services are available in this environment — those integrations were verified by reading the adapter code (§7 High #5) and by observing this dev database's own real, pre-existing production-like data (see below), not by making live calls.
+
+**Real, useful signal found in the existing dev database, not manufactured for this test:** a real account (`info@crosstecch.com`) has two flows scheduled every 15 minutes against an invalid Instantly API key. Both have been failing and dead-lettering correctly and repeatedly (42 dead jobs system-wide) rather than silently losing data or crash-looping. This is live evidence, under real non-scripted conditions, that the retry/backoff/dead-letter mechanics described in §4 actually work.
+
+**Bug found — Critical, fixed and verified:** `/warehouse` crashed with an unrecoverable client-side exception ("Rendered fewer hooks than expected") for **any account without BigQuery credentials configured** — i.e., every brand-new signup, by definition, before connecting a warehouse destination. Root cause: the page's "not configured" early `return` was positioned before a `React.useMemo` call later in the component, so the hook count differed between the loading render and the not-configured render — a genuine Rules-of-Hooks violation, not an HMR artifact (confirmed by reproducing it in a real production build, not just dev). Fixed by moving the early return after all hooks execute unconditionally; verified clean in both dev and production builds afterward. This was the single most severe issue found in this entire pass, because it sat directly on the golden path in §3 — every new customer would have hit it on their very first visit to Warehouse Monitoring. Committed in `73e9173`.
+
+**Bug found — Medium, documented not fixed:** the flow-creation wizard's open/closed state (`active` in `flow-wizard.store.ts`) is persisted to `localStorage` under a global key (`crosstecch-wizard-v1`), not scoped per-user. Since `startWizard()` unconditionally resets every other field whenever the wizard opens, persisting `active` provides no actual "resume my progress" benefit — its only observable effect is that an abandoned wizard (closed by navigating away rather than clicking Cancel) reopens on every future visit to `/flows`, for any user sharing that browser. Not fixed here because the correct behavior (never persist `active`, vs. persist it but scope by user) is a product decision, not an unambiguous bug fix.
+
+**Everything else checked clean:** Dashboard, Flows (after dismissing the stuck wizard), Query Studio, Models, Dashboards, Catalog, Lineage, Automation, Observability, Settings all loaded with zero console errors and correct empty/not-configured states for a fresh account. `/admin` and `/ai-ops` correctly redirect for a non-admin user (confirming they're inert stubs, not crashing entry points — consistent with §7's "no frontend yet" finding, not a new issue).
+
+### Score: **68/100**
+
+Revised from the pre-verification estimate of 62 — the single most severe issue found (a golden-path crash) is now fixed and confirmed in production mode, which is a meaningful, verified improvement, not just a documentation exercise. The remaining gap to a higher score is unchanged from §7: RBAC/Admin/Invite-team (Critical), connector retry/backoff and the wizard object-selection gap (High), AI Ops' missing LLM and hardcoded suggestion array (High), and the newly-found wizard-persistence UX flaw (Medium). None of these require a rewrite — every one is additive work on a foundation that, this pass confirmed, holds up under real interactive use, not just static reading.
 
 ---
 
