@@ -20,7 +20,7 @@ import { genId } from "./crypto";
 
 export type JobStatus = "queued" | "running" | "success" | "failed" | "dead";
 
-export type JobType = "sync_flow" | "schema_check" | "rollup" | "warehouse_audit";
+export type JobType = "sync_flow" | "schema_check" | "rollup" | "warehouse_audit" | "fire_automation";
 
 export interface JobRow {
   id: string;

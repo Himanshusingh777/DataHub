@@ -12,38 +12,18 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getDb } from "@/lib/server/db";
 import { randomToken } from "@/lib/server/crypto";
+import { sendEmail } from "@/lib/server/email";
 
 const RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 async function sendResetEmail(to: string, token: string, origin: string): Promise<void> {
   const resetUrl = `${origin}/reset-password?token=${token}`;
-
-  // Production: Resend
-  const resendKey = process.env.RESEND_API_KEY;
-  if (resendKey) {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: process.env.RESEND_FROM_EMAIL ?? "noreply@crosstecch.io",
-        to,
-        subject: "Reset your CrossTecch password",
-        html: `
-          <p>You requested a password reset for your CrossTecch account.</p>
-          <p><a href="${resetUrl}" style="color:#6366f1;font-weight:bold">Reset your password</a></p>
-          <p>This link expires in 1 hour. If you didn't request this, ignore this email.</p>
-          <p style="color:#9ca3af;font-size:12px">${resetUrl}</p>
-        `,
-      }),
-    });
-    return;
-  }
-
-  // Development fallback — log to console
-  console.log(`[auth] Password reset link for ${to}: ${resetUrl}`);
+  await sendEmail(to, "Reset your CrossTecch password", `
+    <p>You requested a password reset for your CrossTecch account.</p>
+    <p><a href="${resetUrl}" style="color:#6366f1;font-weight:bold">Reset your password</a></p>
+    <p>This link expires in 1 hour. If you didn't request this, ignore this email.</p>
+    <p style="color:#9ca3af;font-size:12px">${resetUrl}</p>
+  `);
 }
 
 export async function POST(req: NextRequest) {

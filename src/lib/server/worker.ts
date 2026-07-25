@@ -16,6 +16,7 @@ import { writeAudit } from "./audit";
 import { decrypt } from "./crypto";
 import { getWarehouseSnapshot } from "./warehouse-monitor";
 import { rollupUsageEvents } from "./billing";
+import { fireAutomations, fireScheduledAutomation } from "./automation";
 
 const POLL_MS = 2_000;
 const REAP_INTERVAL_MS = 5 * 60_000;
@@ -40,6 +41,12 @@ registerHandler("sync_flow", async (payload) => {
   if (!flow) throw new Error(`Flow ${flowId} no longer exists`);
 
   const triggerBy = (payload.triggerBy as "manual" | "schedule") ?? "schedule";
+  const automationCtx = { userId: flow.user_id, workspaceId: flow.workspace_id ?? "default", flowId: flow.id, flowName: flow.name ?? flow.source_id };
+
+  // Automation hooks are best-effort: a failing webhook/email must never
+  // break the actual sync, so each call is awaited but never allowed to
+  // throw out of this handler (fireAutomations already catches per-rule).
+  await fireAutomations("pre_sync", automationCtx);
 
   // Dispatch on the flow's own sync_mode (defaults to 'full' for every flow
   // created before this column existed — see db.ts migration). Only flows
@@ -47,7 +54,13 @@ registerHandler("sync_flow", async (payload) => {
   const result = flow.sync_mode === "incremental"
     ? await runFlowSyncIncremental(flow, triggerBy)
     : await runFlowSync(flow, triggerBy);
-  if (!result.ok) throw new Error(result.error ?? "Sync failed");
+
+  if (!result.ok) {
+    await fireAutomations("on_failure", { ...automationCtx, error: result.error ?? "Sync failed" });
+    throw new Error(result.error ?? "Sync failed");
+  }
+
+  await fireAutomations("post_sync", automationCtx);
   return { rows: result.rows, mode: flow.sync_mode ?? "full" };
 });
 
@@ -120,6 +133,20 @@ registerHandler("warehouse_audit", async (payload) => {
   });
 
   return { totalGB: snapshot.storage.totalGB, staleTables: staleCount };
+});
+
+// ── Default handler: fire_automation ──────────────────────────────────────────
+// Executes one schedule-triggered automation rule. Enqueued by scheduler.ts
+// when an automation's next_run_at comes due — going through the job queue
+// (rather than firing inline from the scheduler tick) gives schedule-based
+// automations the same retry/dead-letter durability as flow syncs, e.g. a
+// webhook endpoint that's briefly down gets retried with backoff instead of
+// silently missing that firing.
+registerHandler("fire_automation", async (payload) => {
+  const automationId = String(payload.automationId ?? "");
+  if (!automationId) throw new Error("fire_automation job missing automationId");
+  await fireScheduledAutomation(automationId);
+  return { automationId };
 });
 
 // ── Worker pool controller ────────────────────────────────────────────────────

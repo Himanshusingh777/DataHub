@@ -337,6 +337,11 @@ function migrate(db: any) {
   addColumnIfMissing(db, "runs",          "workspace_id", "TEXT NOT NULL DEFAULT 'default'");
   addColumnIfMissing(db, "query_history", "workspace_id", "TEXT NOT NULL DEFAULT 'default'");
   addColumnIfMissing(db, "automations",   "workspace_id", "TEXT NOT NULL DEFAULT 'default'");
+  // Schedule-trigger tracking (mirrors flows.next_run_at) + last-fire status,
+  // surfaced in the Automation UI and used by the scheduler tick.
+  addColumnIfMissing(db, "automations",   "next_run_at",  "INTEGER");
+  addColumnIfMissing(db, "automations",   "last_fired_at", "INTEGER");
+  addColumnIfMissing(db, "automations",   "last_status",  "TEXT"); // 'success' | 'error'
   addColumnIfMissing(db, "api_keys",      "workspace_id", "TEXT NOT NULL DEFAULT 'default'");
   addColumnIfMissing(db, "environments",  "workspace_id", "TEXT NOT NULL DEFAULT 'default'");
   // Augment catalog_tables to support multi-connector (not just BQ)

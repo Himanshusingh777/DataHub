@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   Activity,
   BookMarked,
+  Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui.store";
@@ -43,6 +44,7 @@ const NAV_ITEMS = [
   { label: "Warehouse",      icon: Database,        href: "/warehouse" },
   { label: "Query",          icon: Code2,           href: "/query" },
   { label: "Catalog",        icon: BookMarked,      href: "/catalog" },
+  { label: "Automation",     icon: Workflow,        href: "/automation" },
   { label: "Observability",  icon: Activity,        href: "/observability" },
 ];
 
