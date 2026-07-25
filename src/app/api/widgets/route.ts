@@ -10,27 +10,18 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getAuthContext } from "@/lib/server/auth";
 import { getDb } from "@/lib/server/db";
+import { CHART_TYPE_SET } from "@/lib/models-data";
 
 export const dynamic = "force-dynamic";
 
-const VALID_CHART_TYPES = new Set([
-  // Comparison
-  "bar", "column", "grouped_bar", "grouped_column", "stacked_bar",
-  "stacked_column", "horizontal_bar",
-  // Trend
-  "line", "area", "stacked_area", "spline", "combo",
-  // Part-of-whole
-  "pie", "donut", "treemap", "sunburst", "waterfall", "funnel",
-  // Distribution
-  "histogram", "box_plot", "scatter", "bubble",
-  // KPI
-  "kpi", "gauge", "progress_bar", "bullet", "sparkline",
-  // Table
-  "table", "pivot", "calendar_heatmap",
-  // Advanced
-  "geo_map", "choropleth", "sankey", "network", "radar",
-  "polar", "word_cloud", "candlestick", "timeline", "heatmap",
-]);
+// Was previously its own hand-maintained list using entirely different
+// names ("column", "grouped_bar", "kpi", "box_plot", "choropleth"...) than
+// what components/charts/chart-engine.tsx (the actual renderer) knows how
+// to draw — every widget created with most of those values would have hit
+// ChartEngine's "Unsupported chart type" fallback. CHART_TYPE_SET is the
+// renderer's real vocabulary; validating against it here means what the
+// API accepts and what the UI can render are the same 35 types, always.
+const VALID_CHART_TYPES = CHART_TYPE_SET;
 
 export async function POST(req: NextRequest) {
   const { userId, workspaceId } = getAuthContext(req);

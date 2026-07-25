@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getAuthContext } from "@/lib/server/auth";
 import { getDb } from "@/lib/server/db";
+import { CHART_TYPE_SET } from "@/lib/models-data";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,9 @@ export async function PUT(
     ).get(body.model_id, workspaceId);
     if (!model) return NextResponse.json({ ok: false, error: "Model not found" }, { status: 404 });
   }
+
+  if (body.chart_type && !CHART_TYPE_SET.has(body.chart_type))
+    return NextResponse.json({ ok: false, error: `Unknown chart_type: "${body.chart_type}"` }, { status: 400 });
 
   const now = Date.now();
   db.prepare(`
