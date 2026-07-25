@@ -1,0 +1,51 @@
+order_id,customer_email,product_name,quantity,unit_price,total_amount,order_date,status,shipping_country,coupon_code
+ORD-10842,alice@example.com,Premium Headphones,1,149.99,149.99,2024-10-01,completed,US,
+ORD-10843,bob@company.io,USB-C Hub,2,89.00,178.00,2024-10-01,pending,UK,SAVE10
+ORD-10844,carol@mail.net,Mechanical Keyboard,2,199.50,399.00,2024-10-02,completed,CA,WINTER20
+ORD-10845,dave@org.com,Wireless Mouse,1,59.99,59.99,2024-10-02,completed,US,
+ORD-10846,eve@startup.io,Monitor Stand,1,79.00,79.00,2024-10-03,refunded,DE,
+ORD-10847,frank@business.co,HDMI Cable 4K,3,24.99,74.97,2024-10-03,completed,US,SAVE10
+ORD-10848,grace@enterprise.com,Laptop Sleeve,2,39.99,79.98,2024-10-04,completed,AU,
+ORD-10849,henry@domain.net,USB Hub 7-port,1,49.99,49.99,2024-10-04,pending,US,
+ORD-10850,iris@company.org,Webcam HD,1,89.99,89.99,2024-10-05,completed,FR,WINTER20
+ORD-10851,jack@email.com,Noise Cancelling Earbuds,1,249.00,249.00,2024-10-05,completed,US,
+ORD-10852,kate@firm.io,Standing Desk Mat,1,45.00,45.00,2024-10-06,completed,US,SAVE10
+ORD-10853,liam@tech.co,4K Monitor,1,399.99,399.99,2024-10-06,completed,UK,
+ORD-10854,mia@brand.net,Ergonomic Chair,1,599.00,599.00,2024-10-07,processing,US,
+ORD-10855,noah@service.com,Desk Lamp LED,2,34.99,69.98,2024-10-07,completed,CA,
+ORD-10856,olivia@cloud.io,Mousepad XL,1,19.99,19.99,2024-10-08,completed,AU,
+ORD-10857,peter@data.org,Cable Management Kit,1,29.99,29.99,2024-10-08,completed,US,WINTER20
+ORD-10858,quinn@design.co,Blue Light Glasses,2,49.99,99.98,2024-10-09,completed,US,
+ORD-10859,rose@media.net,Portable SSD 1TB,1,109.99,109.99,2024-10-09,refunded,DE,
+ORD-10860,sam@agency.com,Wireless Charger,1,39.99,39.99,2024-10-10,completed,UK,SAVE10
+ORD-10861,tina@corp.io,USB-A to USB-C Cable,3,12.99,38.97,2024-10-10,completed,US,
+ORD-10862,uma@startup.net,Webcam Ring Light,1,59.99,59.99,2024-10-11,completed,CA,
+ORD-10863,victor@firm.co,Mechanical Keyboard,1,199.50,199.50,2024-10-11,pending,FR,WINTER20
+ORD-10864,wendy@brand.io,HDMI Switch 4-port,1,49.99,49.99,2024-10-12,completed,AU,
+ORD-10865,xander@tech.org,Premium Headphones,2,149.99,299.98,2024-10-12,completed,US,
+ORD-10866,yara@cloud.com,Laptop Stand Aluminum,1,79.99,79.99,2024-10-13,completed,UK,SAVE10
+ORD-10867,zoe@digital.co,Gaming Mouse,1,89.99,89.99,2024-10-13,completed,US,
+ORD-10868,alan@service.net,Keyboard Wrist Rest,1,24.99,24.99,2024-10-14,completed,CA,
+ORD-10869,betty@media.io,Thunderbolt 4 Hub,1,149.99,149.99,2024-10-14,completed,US,WINTER20
+ORD-10870,carl@agency.com,Noise Cancelling Earbuds,1,249.00,249.00,2024-10-15,refunded,DE,
+ORD-10871,diana@data.org,Monitor Arm Single,1,89.99,89.99,2024-10-15,completed,US,
+ORD-10872,ethan@design.co,Portable SSD 2TB,1,169.99,169.99,2024-10-16,completed,AU,SAVE10
+ORD-10873,fiona@corp.net,Laptop Cooling Pad,1,44.99,44.99,2024-10-16,completed,UK,
+ORD-10874,george@brand.io,4K Webcam,1,129.99,129.99,2024-10-17,processing,US,
+ORD-10875,helen@startup.com,Cable Organizer Box,2,19.99,39.98,2024-10-17,completed,CA,WINTER20
+ORD-10876,ian@tech.co,USB-C Hub 11-in-1,1,99.99,99.99,2024-10-18,completed,US,
+ORD-10877,julia@firm.net,Ergonomic Mouse,1,69.99,69.99,2024-10-18,completed,FR,
+ORD-10878,kevin@cloud.io,Mechanical Keyboard TKL,1,159.99,159.99,2024-10-19,completed,US,SAVE10
+ORD-10879,laura@service.org,Monitor Light Bar,1,59.99,59.99,2024-10-19,completed,UK,
+ORD-10880,mike@media.co,Premium Headphones,1,149.99,149.99,2024-10-20,completed,AU,
+ORD-10881,nancy@agency.net,Wireless Keyboard Mouse,1,79.99,79.99,2024-10-20,completed,US,WINTER20
+ORD-10882,oscar@data.io,Stream Deck Mini,1,99.99,99.99,2024-10-21,completed,US,
+ORD-10883,paula@design.com,Capture Card 4K,1,149.99,149.99,2024-10-21,pending,DE,
+ORD-10884,quentin@corp.co,Green Screen Kit,1,89.99,89.99,2024-10-22,completed,US,SAVE10
+ORD-10885,rachel@brand.net,Condenser Microphone,1,129.99,129.99,2024-10-22,completed,CA,
+ORD-10886,steven@startup.io,Boom Arm Mic Stand,1,49.99,49.99,2024-10-23,completed,UK,
+ORD-10887,tracy@tech.org,Pop Filter,2,14.99,29.98,2024-10-23,completed,US,WINTER20
+ORD-10888,urban@firm.com,Acoustic Foam Panels,4,9.99,39.96,2024-10-24,completed,AU,
+ORD-10889,vera@cloud.co,DSLR Camera Mount,1,39.99,39.99,2024-10-24,completed,US,
+ORD-10890,will@service.net,Elgato Key Light,1,199.99,199.99,2024-10-25,completed,US,SAVE10
+ORD-10891,xenia@media.io,Ring Light 18 inch,1,89.99,89.99,2024-10-25,completed,FR,

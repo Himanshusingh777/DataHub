@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Env & secrets
+.env*.local
+.env
+
+# CrossTecch backend — database + encryption key (NEVER commit)
+.crosstecch/
+
+# Misc
+.DS_Store
+*.log
