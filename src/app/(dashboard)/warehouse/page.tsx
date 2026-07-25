@@ -161,21 +161,16 @@ export default function WarehousePage() {
     setSort(prev => prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" });
   }
 
-  if (!loading && notConfigured) {
-    return (
-      <div className="p-6">
-        <EmptyState message="BigQuery is not configured yet. Connect a warehouse destination in a flow's Destination step, then this page will show live storage, cost, health and load-duration telemetry." />
-      </div>
-    );
-  }
-
   const storage = snapshot?.storage;
   const queryCost = snapshot?.queryCost;
   const clusterHealth = snapshot?.clusterHealth ?? [];
   const loadDurations = snapshot?.loadDurations ?? [];
   const staleCount = clusterHealth.filter((t) => t.status === "stale").length;
 
-  // Filtered + sorted tables
+  // Filtered + sorted tables. This useMemo (and every hook above it) must run
+  // on every render, including the notConfigured render below — an early
+  // return placed before a hook call changes the hook count between renders
+  // and React throws "Rendered fewer hooks than expected."
   const filteredTables = React.useMemo(() => {
     const q = tableSearch.toLowerCase();
     const tables = (storage?.tables ?? []).filter(t => !q || t.table.toLowerCase().includes(q));
@@ -186,6 +181,14 @@ export default function WarehousePage() {
       return dir * ((a.totalBytes ?? 0) - (b.totalBytes ?? 0));
     });
   }, [storage, tableSearch, sort]);
+
+  if (!loading && notConfigured) {
+    return (
+      <div className="p-6">
+        <EmptyState message="BigQuery is not configured yet. Connect a warehouse destination in a flow's Destination step, then this page will show live storage, cost, health and load-duration telemetry." />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-6 p-6">
