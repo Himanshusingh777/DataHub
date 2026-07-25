@@ -23,12 +23,12 @@ function guardAdmin(req: NextRequest) {
 // ── PATCH — update role / status / name ──────────────────────────────────────
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const admin = guardAdmin(req);
   if (!admin) return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
 
-  const { id } = params;
+  const { id } = await params;
   const db = getDb();
   const user = db.prepare("SELECT id, email, role, status FROM users WHERE id=?").get(id) as
     { id: string; email: string; role: string; status: string } | undefined;
@@ -106,12 +106,12 @@ export async function PATCH(
 // ── DELETE — remove user + cascade ───────────────────────────────────────────
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const admin = guardAdmin(req);
   if (!admin) return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
 
-  const { id } = params;
+  const { id } = await params;
   const db = getDb();
 
   const user = db.prepare("SELECT id, email FROM users WHERE id=?").get(id) as

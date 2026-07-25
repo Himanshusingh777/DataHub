@@ -146,6 +146,17 @@ export class ShopifyConnector extends BaseConnector {
   }
 
   private async get(domain: string, token: string, resource: string, params: Record<string, string> = {}): Promise<unknown> {
+    const { data } = await this.getPage(domain, token, resource, params);
+    return data;
+  }
+
+  /**
+   * Shopify's REST Admin API paginates via an RFC 5988 `Link` response
+   * header (`<...&page_info=xxx>; rel="next"`), not a token in the JSON
+   * body. This fetches one page and extracts the `page_info` cursor for
+   * the next page, if any.
+   */
+  private async getPage(domain: string, token: string, resource: string, params: Record<string, string> = {}): Promise<{ data: unknown; nextPageInfo: string | null }> {
     const url = new URL(this.url(domain, resource));
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     const res = await fetch(url.toString(), {
@@ -155,7 +166,22 @@ export class ShopifyConnector extends BaseConnector {
       },
     });
     if (!res.ok) throw new Error(`Shopify API error ${res.status}: ${await res.text()}`);
-    return res.json();
+    const data = await res.json();
+    return { data, nextPageInfo: this.parseNextPageInfo(res.headers.get("link")) };
+  }
+
+  private parseNextPageInfo(linkHeader: string | null): string | null {
+    if (!linkHeader) return null;
+    for (const part of linkHeader.split(",")) {
+      const match = part.match(/<([^>]+)>;\s*rel="next"/);
+      if (!match) continue;
+      try {
+        return new URL(match[1]).searchParams.get("page_info");
+      } catch {
+        return null;
+      }
+    }
+    return null;
   }
 
   async authenticate(creds: Record<string, string>): Promise<string | null> {
@@ -215,21 +241,22 @@ export class ShopifyConnector extends BaseConnector {
       return { rows, schema: SHOPIFY_SCHEMA[objectId]!, rowCount: rows.length };
     }
 
-    // Standard paginated objects (orders, products, customers)
+    // Standard paginated objects (orders, products, customers).
+    // Shopify's page_info cursor is opaque and self-contained — once set,
+    // no other filter params (e.g. updated_at_min) may be sent alongside it.
     do {
-      const params: Record<string, string> = { limit: String(limit) };
-      if (opts.startDate) params.updated_at_min = opts.startDate;
-      if (pageInfo) params.page_info = pageInfo;
+      const params: Record<string, string> = pageInfo
+        ? { limit: String(limit), page_info: pageInfo }
+        : { limit: String(limit), ...(opts.startDate ? { updated_at_min: opts.startDate } : {}) };
 
-      const data = await this.get(shop_domain, access_token, objectId, pageInfo ? { limit: String(limit), page_info: pageInfo } : params) as Record<string, ShopifyRecord[]>;
+      const { data, nextPageInfo } = await this.getPage(shop_domain, access_token, objectId, params);
       const key = objectId as string;
-      const batch = (data[key] ?? []).map((r: ShopifyRecord) => this.flattenShopifyRecord(r, objectId));
+      const batch = ((data as Record<string, ShopifyRecord[]>)[key] ?? []).map((r: ShopifyRecord) => this.flattenShopifyRecord(r, objectId));
       allRows.push(...batch);
       log("info", `Page fetched: ${batch.length} ${objectId} (total so far: ${allRows.length})`);
 
-      // Shopify cursor-based pagination via Link header — simplified (no link header in JSON)
-      pageInfo = undefined; // real impl: parse Link header from response
-      if (batch.length < limit) break;
+      pageInfo = nextPageInfo ?? undefined;
+      if (!pageInfo) break;
 
       // Rate limit: 2 req/s
       await new Promise(r => setTimeout(r, 600));

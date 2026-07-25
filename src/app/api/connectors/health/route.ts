@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { initRegistry, listConnectors } from "@/lib/connectors/registry";
+import { initRegistry, listConnectors, getConnector } from "@/lib/connectors/registry";
 import { getAuthContext } from "@/lib/server/auth-utils";
 import { getDb } from "@/lib/server/db";
 import { decrypt } from "@/lib/server/crypto";
@@ -24,18 +24,21 @@ export async function GET(req: NextRequest) {
   const now = new Date().toISOString();
 
   const results: HealthEntry[] = await Promise.all(
-    connectors.map(async (connector) => {
-      const id = connector.metadata.id;
+    connectors.map(async (meta) => {
+      const id = meta.id;
+      const connector = getConnector(id);
+      if (!connector) {
+        return { connectorId: id, ok: false, latencyMs: 0, message: "Connector not registered", lastChecked: now };
+      }
       try {
-        // Load credentials — try user's own first, then shared/admin fallback
-        let row = db.prepare(
-          "SELECT data FROM credentials WHERE user_id = ? AND service = ? LIMIT 1"
-        ).get(userId, id) as { data: string } | undefined;
-        if (!row) {
-          row = db.prepare(
-            "SELECT data FROM credentials WHERE service = ? LIMIT 1"
-          ).get(id) as { data: string } | undefined;
-        }
+        // Scoped strictly to this workspace + user — no cross-tenant fallback.
+        // (A prior version of this query fell back to "any credential for
+        // this service in the whole table" with no scoping, which leaked
+        // other tenants' credentials into a workspace that had none of its
+        // own configured — the same class of bug fixed in bq-creds.ts.)
+        const row = db.prepare(
+          "SELECT data FROM credentials WHERE user_id = ? AND workspace_id = ? AND service = ? LIMIT 1"
+        ).get(userId, workspaceId, id) as { data: string } | undefined;
 
         if (!row) {
           return { connectorId: id, ok: false, latencyMs: 0, message: "No credentials configured", lastChecked: now };

@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   }
 
   const hashed = hashPassword(password);
-  db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hashed, reset.user_id);
+  db.prepare("UPDATE users SET pass_hash = ? WHERE id = ?").run(hashed, reset.user_id);
   db.prepare("DELETE FROM password_resets WHERE user_id = ?").run(reset.user_id);
 
   // Invalidate all existing sessions for security

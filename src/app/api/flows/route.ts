@@ -32,8 +32,10 @@ export async function POST(req: NextRequest) {
     const { userId, workspaceId } = getAuthContext(req);
     const db = getDb();
 
-    const existing = db.prepare("SELECT sync_mode, key_columns FROM flows WHERE id = ?").get(body.id) as
-      | { sync_mode: string; key_columns: string | null } | undefined;
+    const existing = db.prepare("SELECT user_id, workspace_id, sync_mode, key_columns FROM flows WHERE id = ?").get(body.id) as
+      | { user_id: string; workspace_id: string; sync_mode: string; key_columns: string | null } | undefined;
+    if (existing && (existing.user_id !== userId || existing.workspace_id !== workspaceId))
+      return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
     const effectiveSyncMode = body.syncMode ?? existing?.sync_mode ?? "full";
     const effectiveKeyColumns = body.keyColumns
       ? JSON.stringify(body.keyColumns)
@@ -67,8 +69,7 @@ export async function GET(req: NextRequest) {
   try {
     const { userId, workspaceId } = getAuthContext(req);
     const db = getDb();
-    // Each user sees only their own flows. Admin can use impersonation to view others.
-    const flows = db.prepare("SELECT * FROM flows WHERE user_id = ? ORDER BY created_at DESC").all(userId);
+    const flows = db.prepare("SELECT * FROM flows WHERE user_id = ? AND workspace_id = ? ORDER BY created_at DESC").all(userId, workspaceId);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const withRuns = (flows as any[]).map((f) => ({
       ...f,

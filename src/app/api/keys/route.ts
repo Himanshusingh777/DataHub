@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { getDb } from "@/lib/server/db";
 import { getAuthContext } from "@/lib/server/auth";
-import { encrypt } from "@/lib/server/crypto";
+import { hashApiKey } from "@/lib/server/crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -45,13 +45,13 @@ export async function POST(req: NextRequest) {
   const scopes = body.scopes ?? ["read"];
   const now = new Date().toISOString();
 
-  const encrypted = encrypt(rawKey);
+  const keyHash = hashApiKey(rawKey);
 
   const db = getDb();
   db.prepare(
-    `INSERT INTO api_keys (id, user_id, workspace_id, name, prefix, encrypted_key, scopes, status, created_at)
+    `INSERT INTO api_keys (id, user_id, workspace_id, name, prefix, key_hash, scopes, status, created_at)
      VALUES (?,?,?,?,?,?,?,?,?)`
-  ).run(id, userId, workspaceId, name, prefix, encrypted, JSON.stringify(scopes), "active", now);
+  ).run(id, userId, workspaceId, name, prefix, keyHash, JSON.stringify(scopes), "active", now);
 
   return NextResponse.json({
     key: { id, name, prefix, scopes, status: "active", createdAt: now, lastUsedAt: null },

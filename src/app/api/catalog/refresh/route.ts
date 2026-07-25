@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthContext } from "@/lib/server/auth-utils";
 import { getDb } from "@/lib/server/db";
 import { decrypt } from "@/lib/server/crypto";
-import { initRegistry, listConnectors } from "@/lib/connectors/registry";
+import { initRegistry, listConnectors, getConnector } from "@/lib/connectors/registry";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -25,8 +25,10 @@ export async function POST(req: NextRequest) {
   let columnsUpserted = 0;
   const errors: string[] = [];
 
-  for (const connector of connectors) {
-    const id = connector.metadata.id;
+  for (const meta of connectors) {
+    const id = meta.id;
+    const connector = getConnector(id);
+    if (!connector) continue;
     try {
       const row = db.prepare(
         "SELECT data FROM credentials WHERE user_id = ? AND workspace_id = ? AND service = ? LIMIT 1"

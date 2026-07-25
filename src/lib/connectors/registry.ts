@@ -47,7 +47,7 @@ export interface ConnectorCapability {
   supportsIncremental: boolean;
   supportsSchemaDiscovery: boolean;
   authType: string;
-  objectCount?: number;
+  objectCount?: number | null;
   status: "production" | "beta" | "coming_soon";
 }
 

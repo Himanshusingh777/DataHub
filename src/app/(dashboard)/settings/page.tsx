@@ -1658,7 +1658,6 @@ export default function SettingsPage() {
                 >
                   <Icon className={cn("h-4 w-4 shrink-0", active ? "text-brand-600" : "text-muted-foreground")} />
                   {cfg.label}
-                  {t === "danger" && <AlertTriangle className="ml-auto h-3 w-3 text-rose-500" />}
                 </button>
               );
             })}

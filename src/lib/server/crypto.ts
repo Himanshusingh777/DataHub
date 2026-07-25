@@ -91,6 +91,16 @@ export function randomToken(): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
+// ── API key hashing (SHA-256) ────────────────────────────────────────────────
+// API keys are high-entropy random tokens (24 bytes), so a fast deterministic
+// hash gives safe storage while still allowing O(1) lookup-by-presented-key —
+// unlike passwords, which need a salted/slow hash because they're low-entropy
+// and guessable.
+
+export function hashApiKey(rawKey: string): string {
+  return crypto.createHash("sha256").update(rawKey).digest("hex");
+}
+
 export function genId(prefix: string): string {
   return `${prefix}-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
 }

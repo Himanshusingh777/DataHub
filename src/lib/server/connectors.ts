@@ -208,10 +208,15 @@ export function wrapSdkConnector(connector: BaseConnector): ConnectorAdapter {
       });
       return {
         rows: result.rows as Record<string, unknown>[],
+        // BQField (the ETL/load layer's schema type) only supports
+        // NULLABLE/REQUIRED — no connector today declares a REPEATED field,
+        // but downgrade defensively rather than reject the sync outright if
+        // one ever does (arrays are already JSON-stringified into STRING
+        // columns before reaching BigQuery — see e.g. flattenShopifyRecord).
         schema: result.schema?.map(f => ({
           name: f.name,
           type: f.type as "STRING" | "INT64" | "FLOAT64" | "BOOL" | "TIMESTAMP" | "DATE" | "BYTES",
-          mode: f.mode ?? "NULLABLE",
+          mode: (f.mode === "REPEATED" ? "NULLABLE" : f.mode) ?? "NULLABLE",
         })),
       };
     },

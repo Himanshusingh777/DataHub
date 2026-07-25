@@ -130,7 +130,8 @@ export async function POST(
       credentials: bqCreds.credentials,
     });
 
-    const [rows, , response] = await bq.query({
+    // bq.query() resolves [rows, job] — the job carries .statistics.query.totalBytesProcessed
+    const [rows, job] = await bq.query({
       query:              finalSql,
       params:             filterValues.length ? filterValues : undefined,
       maximumBytesBilled: "1000000000",
@@ -138,7 +139,7 @@ export async function POST(
     });
 
     const durationMs     = Date.now() - started;
-    const bytesProcessed = Number(response?.statistics?.query?.totalBytesProcessed ?? 0);
+    const bytesProcessed = Number(job?.statistics?.query?.totalBytesProcessed ?? 0);
     const clean          = (rows as Record<string, unknown>[]).map(flattenBqRow);
 
     const schema = clean.length > 0

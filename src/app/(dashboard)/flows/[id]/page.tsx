@@ -416,7 +416,7 @@ function WarehouseDashboardTab({ flow }: { flow: DataFlow }) {
   React.useEffect(() => {
     if (!configured || table) return;
     WarehouseService.queryWarehouse("list_tables").then((r) => {
-      const names = (r ?? []).map((x: any) => String(x.table_name)).filter(Boolean);
+      const names = r?.tables ?? [];
       setTables(names);
       const cand = flow.source.id === "csv"
         ? names.find((n) => !n.startsWith("instantly")) ?? names[0]
@@ -431,7 +431,7 @@ function WarehouseDashboardTab({ flow }: { flow: DataFlow }) {
     if (!configured || !table) return;
     setLoading(true);
     WarehouseService.queryWarehouse("table_preview", { table, limit: "200" }).then((r) => {
-      setRows(r);
+      setRows(r?.rows ?? []);
       setLoading(false);
     });
   }, [table, configured]);
@@ -1009,6 +1009,7 @@ export default function FlowDetailPage({ params }: { params: Promise<{ id: strin
   }
 
   function handleDeleteConfirm() {
+    if (!flow) return;
     if (isDemo) {
       deleteFlow(flow.id);
       addEvent({ type: "flow_deleted", title: "Flow deleted", description: `${flow.source.name} → ${flow.destination.name}`, flowId: flow.id });
@@ -1018,6 +1019,7 @@ export default function FlowDetailPage({ params }: { params: Promise<{ id: strin
   }
 
   function handleScheduleSave(scheduleValue: string) {
+    if (!flow) return;
     const opt = SCHEDULE_OPTIONS.find((o) => o.value === scheduleValue);
     if (isDemo && opt) {
       updateFlow(flow.id, { schedule: opt.label, scheduleValue });

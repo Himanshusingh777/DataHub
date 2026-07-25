@@ -76,14 +76,15 @@ export async function POST(
       credentials: bqCreds.credentials,
     });
 
-    const [rows, , response] = await bq.query({
+    // bq.query() resolves [rows, job] — the job carries .statistics.query.totalBytesProcessed
+    const [rows, job] = await bq.query({
       query: sql,
       maximumBytesBilled: "1000000000", // 1 GB cap
       defaultDataset: { datasetId: dataset, projectId: bqCreds.projectId },
     });
 
     const durationMs     = Date.now() - started;
-    const bytesProcessed = Number(response?.statistics?.query?.totalBytesProcessed ?? 0);
+    const bytesProcessed = Number(job?.statistics?.query?.totalBytesProcessed ?? 0);
     const clean          = (rows as Record<string, unknown>[]).map(flattenBqRow);
 
     // ── Derive schema from first row ──────────────────────────────────────

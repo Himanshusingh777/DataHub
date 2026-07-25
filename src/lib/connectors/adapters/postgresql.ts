@@ -167,44 +167,70 @@ export class PostgreSQLConnector extends BaseConnector {
     }
   }
 
+  /**
+   * Fetches every matching row for `objectId`, paginating internally so the
+   * caller (runner.ts) always gets a complete result set in one `extract()`
+   * call — the same contract every other adapter (HubSpot, Stripe, Shopify)
+   * already follows. A single-page LIMIT with no follow-up silently dropped
+   * everything past `pageSize` on large tables; this loops until exhausted.
+   *
+   * Incremental mode uses keyset pagination (cursor on the last row's
+   * timestamp) rather than OFFSET, so pages stay correct even as new rows
+   * matching the watermark are written concurrently. Full-refresh mode uses
+   * OFFSET, which is adequate for a one-shot full-table read.
+   */
   async extract(objectId: string, creds: Record<string, string>, opts: ExtractOptions, log: LogFn): Promise<ExtractResult> {
     const PgClient = await getPg();
     const client = new PgClient({ connectionString: creds.connection_string });
     const schema = creds.schema || "public";
     const pageSize = opts.pageSize ?? 50_000;
+    const MAX_ROWS = 10_000_000; // circuit breaker against a runaway loop
 
     try {
       await client.connect();
       log("info", `Extracting ${schema}.${objectId}…`);
 
-      let query: string;
-      const params: unknown[] = [];
+      const schemaFields = await this.discoverSchema(objectId, creds);
+      const allRows: Record<string, unknown>[] = [];
 
       if (opts.startDate) {
-        // Incremental: try updated_at, then created_at
-        query = `
-          SELECT * FROM "${schema}"."${objectId}"
-          WHERE (updated_at >= $1 OR created_at >= $1)
-          ORDER BY COALESCE(updated_at, created_at) ASC
-          LIMIT ${pageSize}
-        `;
-        params.push(opts.startDate);
         log("info", `Incremental mode: extracting rows since ${opts.startDate}`);
+        let cursor: string = opts.startDate;
+        let firstPage = true;
+        for (;;) {
+          const cmp = firstPage ? ">=" : ">"; // first page includes the watermark itself, later pages advance past it
+          const res = await client.query(
+            `SELECT * FROM "${schema}"."${objectId}"
+             WHERE COALESCE(updated_at, created_at) ${cmp} $1
+             ORDER BY COALESCE(updated_at, created_at) ASC
+             LIMIT ${pageSize}`,
+            [cursor]
+          );
+          if (res.rows.length === 0) break;
+          allRows.push(...res.rows);
+          log("info", `Page fetched: ${res.rows.length.toLocaleString()} rows (total so far: ${allRows.length.toLocaleString()})`);
+          const last = res.rows[res.rows.length - 1] as Record<string, unknown>;
+          const lastCursor = (last.updated_at ?? last.created_at) as string | undefined;
+          if (!lastCursor || res.rows.length < pageSize || allRows.length >= MAX_ROWS) break;
+          cursor = lastCursor;
+          firstPage = false;
+        }
       } else {
-        query = `SELECT * FROM "${schema}"."${objectId}" LIMIT ${pageSize}`;
+        let offset = 0;
+        for (;;) {
+          const res = await client.query(`SELECT * FROM "${schema}"."${objectId}" LIMIT ${pageSize} OFFSET ${offset}`);
+          if (res.rows.length === 0) break;
+          allRows.push(...res.rows);
+          log("info", `Page fetched: ${res.rows.length.toLocaleString()} rows (total so far: ${allRows.length.toLocaleString()})`);
+          if (res.rows.length < pageSize || allRows.length >= MAX_ROWS) break;
+          offset += pageSize;
+        }
       }
 
-      const res = await client.query(query, params);
-      log("success", `Extracted ${res.rows.length.toLocaleString()} rows from ${objectId}.`);
+      if (allRows.length >= MAX_ROWS) log("warn", `Hit the ${MAX_ROWS.toLocaleString()}-row safety cap for ${objectId}; remaining rows were not extracted.`);
+      log("success", `Extracted ${allRows.length.toLocaleString()} rows from ${objectId}.`);
 
-      const schemaFields = await this.discoverSchema(objectId, creds);
-
-      return {
-        rows: res.rows,
-        schema: schemaFields,
-        rowCount: res.rows.length,
-        hasMore: res.rows.length === pageSize,
-      };
+      return { rows: allRows, schema: schemaFields, rowCount: allRows.length };
     } finally {
       try { await client.end(); } catch { /* ignore */ }
     }

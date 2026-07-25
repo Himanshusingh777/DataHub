@@ -1,7 +1,15 @@
 // Stub — demo flows removed, but types are preserved for use-server-flows.ts and flows/page.tsx
 
 export type FlowStatus = "active" | "error" | "paused" | "draft";
-export type LogLevel = "info" | "warn" | "error" | "debug";
+export type LogLevel = "info" | "warn" | "error" | "debug" | "success";
+
+export interface FlowLogEntry {
+  id: string;
+  ts: string;
+  level: LogLevel;
+  message: string;
+  meta?: Record<string, unknown>;
+}
 
 export interface FlowRun {
   id: string;
@@ -10,7 +18,7 @@ export interface FlowRun {
   rows: number | null;
   duration: string | null;
   error?: string;
-  logs: string[];
+  logs: FlowLogEntry[];
 }
 
 export interface DataFlow {

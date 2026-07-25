@@ -4,7 +4,12 @@
  * Resolution order for a given (workspaceId, userId):
  *   1. Workspace-level credential  — WHERE workspace_id = ? AND service = 'bigquery'
  *   2. User's own credential       — WHERE user_id = ? AND service = 'bigquery'
- *   3. Shared / admin credential   — any bigquery credential in the vault
+ *
+ * There is intentionally no third "any credential in the vault" fallback —
+ * that used to return ANY tenant's BigQuery credential to a workspace that
+ * had none configured, which is a cross-tenant data-exposure bug. A
+ * workspace/user with no BigQuery credential of their own must get `null`
+ * (fail closed), never someone else's.
  *
  * The dataset returned is:
  *   - The workspace's own dataset_id  (if set in the workspaces table)  — preferred
@@ -44,13 +49,6 @@ export function resolveBqCreds(
     row = db
       .prepare("SELECT data FROM credentials WHERE user_id = ? AND service = 'bigquery'")
       .get(userId) as { data: string } | undefined;
-  }
-
-  // 3. Shared / admin credential (any BQ cred in vault)
-  if (!row) {
-    row = db
-      .prepare("SELECT data FROM credentials WHERE service = 'bigquery' LIMIT 1")
-      .get() as { data: string } | undefined;
   }
 
   if (!row) return null;

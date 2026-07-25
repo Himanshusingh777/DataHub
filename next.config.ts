@@ -26,6 +26,16 @@ const nextConfig: NextConfig = {
   // Fix workspace-root detection when multiple lockfiles exist
   outputFileTracingRoot: path.join(__dirname),
 
+  eslint: {
+    // No eslint config existed in this repo until this refactor, so the
+    // build was never actually gated on lint before — `next build` just
+    // silently skipped it. `npm run lint` now works as a real, standalone
+    // command; decoupling it from the build gate here preserves prior
+    // behavior while the repo-wide lint debt (mostly in files slated for
+    // deletion in the dead-code cleanup phase) gets paid down separately.
+    ignoreDuringBuilds: true,
+  },
+
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "avatars.githubusercontent.com" },

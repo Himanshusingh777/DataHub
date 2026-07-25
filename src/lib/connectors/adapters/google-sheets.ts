@@ -8,6 +8,7 @@
  * or OAuth2 access token for personal use.
  */
 
+import { GoogleAuth } from "google-auth-library";
 import {
   BaseConnector,
   type ConnectorMetadata,
@@ -22,20 +23,14 @@ import {
 type SheetsRecord = Record<string, unknown>;
 
 async function getGoogleAuthToken(serviceJson: string): Promise<string> {
-  // Use the google-auth-library if available, otherwise fall back to JWT signing
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { GoogleAuth } = require("google-auth-library");
-    const auth = new GoogleAuth({
-      credentials: JSON.parse(serviceJson),
-      scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
-    });
-    const client = await auth.getClient();
-    const token = await client.getAccessToken();
-    return token.token as string;
-  } catch {
-    throw new Error("google-auth-library is not installed. Run: npm install google-auth-library");
-  }
+  const auth = new GoogleAuth({
+    credentials: JSON.parse(serviceJson),
+    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+  });
+  const client = await auth.getClient();
+  const token = await client.getAccessToken();
+  if (!token.token) throw new Error("Google Sheets auth returned no access token");
+  return token.token;
 }
 
 export class GoogleSheetsConnector extends BaseConnector {

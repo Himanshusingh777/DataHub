@@ -26,13 +26,13 @@ function genTempPassword(): string {
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const admin = getSessionUser(req);
   if (!admin || !ADMIN_EMAILS.includes(admin.email.toLowerCase()))
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
 
-  const { id } = params;
+  const { id } = await params;
   const db = getDb();
 
   const user = db.prepare("SELECT id, email FROM users WHERE id=?").get(id) as

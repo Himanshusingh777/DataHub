@@ -147,7 +147,7 @@ async function pollLoop(workerId: string) {
 
     const handler = HANDLERS[job.type];
     if (!handler) {
-      failJob(job.id, `No handler registered for job type "${job.type}"`);
+      failJob(job.id, `No handler registered for job type "${job.type}"`, workerId);
       continue;
     }
 
@@ -155,10 +155,10 @@ async function pollLoop(workerId: string) {
       let payload: Record<string, unknown> = {};
       try { payload = JSON.parse(job.payload); } catch { /* malformed payload — handler gets {} */ }
       const result = await handler(payload, job);
-      completeJob(job.id, result ?? undefined);
+      completeJob(job.id, workerId, result ?? undefined);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      const outcome = failJob(job.id, msg);
+      const outcome = failJob(job.id, msg, workerId);
       writeAudit({
         workspaceId: job.workspace_id,
         action: "job.failed",

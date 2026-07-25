@@ -123,31 +123,50 @@ export function claimNextJob(workerId: string, types?: JobType[]): JobRow | null
   return claimTxn.immediate();
 }
 
-export function completeJob(id: string, result?: Record<string, unknown>): void {
+/**
+ * Mark a job successful. Guarded by `status='running' AND locked_by=?` so a
+ * worker whose job was reclaimed out from under it by `reapStaleJobs` (e.g.
+ * a slow-but-alive sync past the stale threshold) can never clobber the
+ * state of whoever claimed the job next — the update simply affects 0 rows
+ * and is silently ignored, which is correct: the outcome was already
+ * decided by the reclaim.
+ */
+export function completeJob(id: string, workerId: string, result?: Record<string, unknown>): void {
   getDb()
-    .prepare(`UPDATE jobs SET status = 'success', result = ?, locked_by = NULL, updated_at = ? WHERE id = ?`)
-    .run(result ? JSON.stringify(result) : null, Date.now(), id);
+    .prepare(
+      `UPDATE jobs SET status = 'success', result = ?, locked_by = NULL, updated_at = ?
+       WHERE id = ? AND status = 'running' AND locked_by = ?`
+    )
+    .run(result ? JSON.stringify(result) : null, Date.now(), id, workerId);
 }
 
-/** Fail a job. Re-queues with backoff unless attempts are exhausted, in which case it's dead-lettered. */
-export function failJob(id: string, error: string): { retried: boolean; nextAttempt?: number } {
+/**
+ * Fail a job. Re-queues with backoff unless attempts are exhausted, in which
+ * case it's dead-lettered. When `workerId` is supplied, only the current
+ * lock holder may transition the job (same race guard as `completeJob`);
+ * omit it only for the reaper's own forced-fail of an already-reclaimed row.
+ */
+export function failJob(id: string, error: string, workerId?: string): { retried: boolean; nextAttempt?: number } {
   const db = getDb();
-  const job = db.prepare("SELECT * FROM jobs WHERE id = ?").get(id) as JobRow | undefined;
+  const lockFilter = workerId ? "AND locked_by = ?" : "";
+  const lockArgs = workerId ? [workerId] : [];
+
+  const job = db.prepare(`SELECT * FROM jobs WHERE id = ? ${lockFilter}`).get(id, ...lockArgs) as JobRow | undefined;
   if (!job) return { retried: false };
 
   const attempts = job.attempts + 1;
   const now = Date.now();
 
   if (attempts >= job.max_attempts) {
-    db.prepare(`UPDATE jobs SET status = 'dead', attempts = ?, last_error = ?, locked_by = NULL, updated_at = ? WHERE id = ?`)
-      .run(attempts, error, now, id);
+    db.prepare(`UPDATE jobs SET status = 'dead', attempts = ?, last_error = ?, locked_by = NULL, updated_at = ? WHERE id = ? ${lockFilter}`)
+      .run(attempts, error, now, id, ...lockArgs);
     return { retried: false };
   }
 
   const nextAttempt = now + backoffMs(attempts);
   db.prepare(`
-    UPDATE jobs SET status = 'queued', attempts = ?, last_error = ?, run_after = ?, locked_by = NULL, updated_at = ? WHERE id = ?
-  `).run(attempts, error, nextAttempt, now, id);
+    UPDATE jobs SET status = 'queued', attempts = ?, last_error = ?, run_after = ?, locked_by = NULL, updated_at = ? WHERE id = ? ${lockFilter}
+  `).run(attempts, error, nextAttempt, now, id, ...lockArgs);
   return { retried: true, nextAttempt };
 }
 
@@ -155,8 +174,9 @@ export function failJob(id: string, error: string): { retried: boolean; nextAtte
 export function reapStaleJobs(staleMs = 10 * 60_000): number {
   const db = getDb();
   const cutoff = Date.now() - staleMs;
-  const stale = db.prepare("SELECT id FROM jobs WHERE status = 'running' AND locked_at < ?").all(cutoff) as { id: string }[];
-  for (const { id } of stale) failJob(id, "Worker timed out or crashed while processing this job.");
+  const stale = db.prepare("SELECT id, locked_by FROM jobs WHERE status = 'running' AND locked_at < ?").all(cutoff) as
+    { id: string; locked_by: string | null }[];
+  for (const { id, locked_by } of stale) failJob(id, "Worker timed out or crashed while processing this job.", locked_by ?? undefined);
   return stale.length;
 }
 

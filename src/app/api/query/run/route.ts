@@ -111,9 +111,9 @@ export async function POST(req: NextRequest) {
 
     const [rows, , metadata] = await job.getQueryResults({ maxResults: 1000 });
     const durationMs = Date.now() - startTime;
-    const bytesProcessed = Number(metadata?.statistics?.totalBytesProcessed ?? 0);
+    const bytesProcessed = Number(metadata?.totalBytesProcessed ?? 0);
     const schema = metadata?.schema?.fields ?? [];
-    const columns = schema.map((f: { name: string }) => f.name);
+    const columns = schema.map((f) => f.name ?? "");
 
     // BigQuery returns TIMESTAMP/DATE values as { value: "..." } objects — flatten to strings
     const flattenBQValue = (v: unknown): unknown => {
