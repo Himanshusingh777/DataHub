@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Zap,
   ShieldCheck,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui.store";
@@ -36,10 +37,11 @@ import {
  */
 
 const NAV_ITEMS = [
-  { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { label: "Flows",     icon: ArrowRightLeft,  href: "/flows" },
-  { label: "Warehouse", icon: Database,        href: "/warehouse" },
-  { label: "Query",     icon: Code2,           href: "/query" },
+  { label: "Dashboard",      icon: LayoutDashboard, href: "/dashboard" },
+  { label: "Flows",          icon: ArrowRightLeft,  href: "/flows" },
+  { label: "Warehouse",      icon: Database,        href: "/warehouse" },
+  { label: "Query",          icon: Code2,           href: "/query" },
+  { label: "Observability",  icon: Activity,        href: "/observability" },
 ];
 
 const BOTTOM_ITEMS = [

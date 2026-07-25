@@ -42,9 +42,9 @@ export async function GET(req: NextRequest) {
   const runStats = db.prepare(`
     SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS success,
-      SUM(CASE WHEN status='error'   THEN 1 ELSE 0 END) AS errors,
-      AVG(CASE WHEN status='success' THEN duration_ms END) AS avgMs
+      SUM(CASE WHEN r.status='success' THEN 1 ELSE 0 END) AS success,
+      SUM(CASE WHEN r.status='error'   THEN 1 ELSE 0 END) AS errors,
+      AVG(CASE WHEN r.status='success' THEN duration_ms END) AS avgMs
     FROM runs r
     JOIN flows f ON f.id = r.flow_id
     WHERE f.user_id = ? AND r.started_at >= ?
