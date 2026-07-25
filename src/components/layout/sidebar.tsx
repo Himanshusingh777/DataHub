@@ -15,6 +15,7 @@ import {
   Zap,
   ShieldCheck,
   Activity,
+  BookMarked,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui.store";
@@ -41,6 +42,7 @@ const NAV_ITEMS = [
   { label: "Flows",          icon: ArrowRightLeft,  href: "/flows" },
   { label: "Warehouse",      icon: Database,        href: "/warehouse" },
   { label: "Query",          icon: Code2,           href: "/query" },
+  { label: "Catalog",        icon: BookMarked,      href: "/catalog" },
   { label: "Observability",  icon: Activity,        href: "/observability" },
 ];
 
