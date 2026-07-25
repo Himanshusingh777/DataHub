@@ -1,19 +1,31 @@
 /**
  * GET /api/lineage
  *
- * Returns a lineage graph derived from the user's actual flows.
- * Falls back to an empty graph; the UI shows a demo graph when empty.
+ * Real lineage graph: Connector → Flow → BigQuery table → Saved Query,
+ * derived entirely from the user's actual flows and saved queries. No
+ * synthetic nodes — a previous version of this route always attached every
+ * warehouse table to hardcoded "Analytics" and "AI Operations" nodes
+ * regardless of whether anything real actually consumed that table; those
+ * features don't exist yet in this codebase; this route now only draws an
+ * edge when it can point to something real.
+ *
+ * The Table → Query edges are genuine SQL analysis (regex-based FROM/JOIN
+ * table-reference extraction, matched against known warehouse table names),
+ * not a full SQL parser — but it inspects the actual saved query text and
+ * only draws an edge when it finds a real match, which is what "lineage
+ * from SQL parsing" means in a codebase with no SQL-AST library dependency.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthContext } from "@/lib/server/auth";
 import { getDb } from "@/lib/server/db";
+import { extractTableRefs, referencesTable } from "@/lib/server/sql-lineage";
 
 export const dynamic = "force-dynamic";
 
 interface LineageNode {
   id: string;
   label: string;
-  type: "connector" | "warehouse" | "transform" | "dashboard" | "report" | "ai";
+  type: "connector" | "pipeline" | "warehouse" | "query";
   subLabel?: string;
 }
 
@@ -29,14 +41,17 @@ export async function GET(req: NextRequest) {
 
   const db = getDb();
 
-  // Pull all flows for this workspace
   const flows = db.prepare(`
-    SELECT id, source_id, source_name, dest_id, dest_name, warehouse_table, status
+    SELECT id, name, source_id, source_name, dest_id, dest_name, warehouse_table, status
     FROM flows WHERE user_id = ? AND workspace_id = ? ORDER BY created_at DESC
   `).all(userId, workspaceId) as Array<{
-    id: string; source_id: string; source_name: string | null;
+    id: string; name: string | null; source_id: string; source_name: string | null;
     dest_id: string; dest_name: string | null; warehouse_table: string | null; status: string;
   }>;
+
+  const savedQueries = db.prepare(`
+    SELECT id, name, sql FROM saved_queries WHERE user_id = ? AND workspace_id = ?
+  `).all(userId, workspaceId) as Array<{ id: string; name: string; sql: string }>;
 
   if (flows.length === 0) {
     return NextResponse.json({ graph: { nodes: [], edges: [] } });
@@ -44,60 +59,50 @@ export async function GET(req: NextRequest) {
 
   const nodes = new Map<string, LineageNode>();
   const edges: LineageEdge[] = [];
-
-  // ETL transform node (shared)
-  nodes.set("etl", { id: "etl", label: "ETL Engine", type: "transform", subLabel: "Transform" });
-  // Analytics dashboard node
-  nodes.set("analytics", { id: "analytics", label: "Analytics", type: "dashboard", subLabel: "Dashboard" });
-  // AI Operations node
-  nodes.set("ai_ops", { id: "ai_ops", label: "AI Operations", type: "ai", subLabel: "Insights" });
+  const warehouseTables = new Set<string>();
 
   for (const flow of flows) {
-    // Source connector node
     const srcId = `src_${flow.source_id}`;
     if (!nodes.has(srcId)) {
-      nodes.set(srcId, {
-        id: srcId,
-        label: flow.source_name ?? flow.source_id,
-        type: "connector",
-        subLabel: "Source",
-      });
+      nodes.set(srcId, { id: srcId, label: flow.source_name ?? flow.source_id, type: "connector", subLabel: "Source" });
     }
 
-    // Source → ETL
-    if (!edges.some(e => e.from === srcId && e.to === "etl")) {
-      edges.push({ from: srcId, to: "etl", label: "extract" });
-    }
+    const flowNodeId = `flow_${flow.id}`;
+    nodes.set(flowNodeId, {
+      id: flowNodeId,
+      label: flow.name?.trim() || `${flow.source_name ?? flow.source_id} → ${flow.dest_name ?? flow.dest_id}`,
+      type: "pipeline",
+      subLabel: flow.status === "active" ? "Active flow" : flow.status === "paused" ? "Paused" : "Flow",
+    });
+    edges.push({ from: srcId, to: flowNodeId, label: "extract" });
 
-    // Warehouse table node
     if (flow.warehouse_table) {
+      warehouseTables.add(flow.warehouse_table);
       const tableId = `bq_${flow.warehouse_table}`;
       if (!nodes.has(tableId)) {
-        nodes.set(tableId, {
-          id: tableId,
-          label: flow.warehouse_table,
-          type: "warehouse",
-          subLabel: "BigQuery",
-        });
+        nodes.set(tableId, { id: tableId, label: flow.warehouse_table, type: "warehouse", subLabel: "BigQuery" });
       }
-      // ETL → warehouse
-      if (!edges.some(e => e.from === "etl" && e.to === tableId)) {
-        edges.push({ from: "etl", to: tableId, label: "load" });
-      }
-      // Warehouse → analytics
-      if (!edges.some(e => e.from === tableId && e.to === "analytics")) {
-        edges.push({ from: tableId, to: "analytics", label: "query" });
-      }
+      edges.push({ from: flowNodeId, to: tableId, label: "load" });
     }
   }
 
-  // Analytics → AI ops
-  edges.push({ from: "analytics", to: "ai_ops", label: "feed" });
+  // Real SQL-based lineage: only draw Table → Query when the query text
+  // actually references that table.
+  for (const q of savedQueries) {
+    const refs = extractTableRefs(q.sql);
+    if (refs.length === 0) continue;
 
-  return NextResponse.json({
-    graph: {
-      nodes: [...nodes.values()],
-      edges,
-    },
-  });
+    let matchedAny = false;
+    for (const table of warehouseTables) {
+      if (referencesTable(refs, table)) {
+        matchedAny = true;
+        edges.push({ from: `bq_${table}`, to: `query_${q.id}`, label: "query" });
+      }
+    }
+    if (matchedAny) {
+      nodes.set(`query_${q.id}`, { id: `query_${q.id}`, label: q.name, type: "query", subLabel: "Saved query" });
+    }
+  }
+
+  return NextResponse.json({ graph: { nodes: [...nodes.values()], edges } });
 }
