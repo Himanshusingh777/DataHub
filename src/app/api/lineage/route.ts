@@ -1,19 +1,20 @@
 /**
  * GET /api/lineage
  *
- * Real lineage graph: Connector → Flow → BigQuery table → Saved Query,
- * derived entirely from the user's actual flows and saved queries. No
- * synthetic nodes — a previous version of this route always attached every
- * warehouse table to hardcoded "Analytics" and "AI Operations" nodes
- * regardless of whether anything real actually consumed that table; those
- * features don't exist yet in this codebase; this route now only draws an
- * edge when it can point to something real.
+ * Real lineage graph: Connector → Flow → BigQuery table → {Saved Query,
+ * Semantic Model}, derived entirely from the user's actual flows, saved
+ * queries and models. No synthetic nodes — a previous version of this
+ * route always attached every warehouse table to hardcoded "Analytics" and
+ * "AI Operations" nodes regardless of whether anything real actually
+ * consumed that table; those features don't exist yet in this codebase;
+ * this route now only draws an edge when it can point to something real.
  *
- * The Table → Query edges are genuine SQL analysis (regex-based FROM/JOIN
- * table-reference extraction, matched against known warehouse table names),
- * not a full SQL parser — but it inspects the actual saved query text and
- * only draws an edge when it finds a real match, which is what "lineage
- * from SQL parsing" means in a codebase with no SQL-AST library dependency.
+ * The Table → Query and Table → Model edges are genuine SQL analysis
+ * (regex-based FROM/JOIN table-reference extraction, matched against known
+ * warehouse table names), not a full SQL parser — but it inspects the
+ * actual query/model SQL text and only draws an edge when it finds a real
+ * match, which is what "lineage from SQL parsing" means in a codebase with
+ * no SQL-AST library dependency.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthContext } from "@/lib/server/auth";
@@ -25,7 +26,7 @@ export const dynamic = "force-dynamic";
 interface LineageNode {
   id: string;
   label: string;
-  type: "connector" | "pipeline" | "warehouse" | "query";
+  type: "connector" | "pipeline" | "warehouse" | "query" | "model";
   subLabel?: string;
 }
 
@@ -52,6 +53,10 @@ export async function GET(req: NextRequest) {
   const savedQueries = db.prepare(`
     SELECT id, name, sql FROM saved_queries WHERE user_id = ? AND workspace_id = ?
   `).all(userId, workspaceId) as Array<{ id: string; name: string; sql: string }>;
+
+  const models = db.prepare(`
+    SELECT id, name, sql_query FROM models WHERE user_id = ? AND workspace_id = ? AND status != 'archived'
+  `).all(userId, workspaceId) as Array<{ id: string; name: string; sql_query: string }>;
 
   if (flows.length === 0) {
     return NextResponse.json({ graph: { nodes: [], edges: [] } });
@@ -101,6 +106,23 @@ export async function GET(req: NextRequest) {
     }
     if (matchedAny) {
       nodes.set(`query_${q.id}`, { id: `query_${q.id}`, label: q.name, type: "query", subLabel: "Saved query" });
+    }
+  }
+
+  // Same real SQL-based matching for Semantic Models.
+  for (const m of models) {
+    const refs = extractTableRefs(m.sql_query);
+    if (refs.length === 0) continue;
+
+    let matchedAny = false;
+    for (const table of warehouseTables) {
+      if (referencesTable(refs, table)) {
+        matchedAny = true;
+        edges.push({ from: `bq_${table}`, to: `model_${m.id}`, label: "model" });
+      }
+    }
+    if (matchedAny) {
+      nodes.set(`model_${m.id}`, { id: `model_${m.id}`, label: m.name, type: "model", subLabel: "Semantic model" });
     }
   }
 

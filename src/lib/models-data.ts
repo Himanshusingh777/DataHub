@@ -212,6 +212,7 @@ export interface SemanticModel {
   schema_json:    string;         // JSON: SchemaColumn[]
   status:         ModelStatus;
   tags:           string;         // JSON: string[]
+  version:        number;         // incremented on every SQL-changing update
   created_at:     number;         // Unix ms
   updated_at:     number;
   // Computed / joined fields (not stored in DB)
@@ -220,6 +221,20 @@ export interface SemanticModel {
   run_count?:     number;
   last_run_at?:   number | null;
   widget_count?:  number;
+  dependencies?:  string[];       // warehouse tables referenced by sql_query (SQL-parsed)
+}
+
+/** One snapshot of a model's SQL, taken automatically before each SQL-changing update. */
+export interface ModelVersion {
+  id:           string;           // mdlv_<16hex>
+  model_id:     string;
+  workspace_id: string;
+  user_id:      string;
+  version:      number;
+  name:         string;
+  description:  string | null;
+  sql_query:    string;
+  created_at:   number;
 }
 
 export interface ModelRun {

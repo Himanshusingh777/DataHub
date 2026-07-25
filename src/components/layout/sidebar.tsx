@@ -18,6 +18,7 @@ import {
   BookMarked,
   Workflow,
   GitBranch,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/ui.store";
@@ -44,6 +45,7 @@ const NAV_ITEMS = [
   { label: "Flows",          icon: ArrowRightLeft,  href: "/flows" },
   { label: "Warehouse",      icon: Database,        href: "/warehouse" },
   { label: "Query",          icon: Code2,           href: "/query" },
+  { label: "Models",         icon: Layers,          href: "/models" },
   { label: "Catalog",        icon: BookMarked,      href: "/catalog" },
   { label: "Lineage",        icon: GitBranch,       href: "/lineage" },
   { label: "Automation",     icon: Workflow,        href: "/automation" },

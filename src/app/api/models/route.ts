@@ -12,33 +12,29 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getAuthContext } from "@/lib/server/auth";
 import { getDb } from "@/lib/server/db";
+import { extractTableRefs, referencesTable } from "@/lib/server/sql-lineage";
+import type { SemanticModel } from "@/lib/models-data";
 
 export const dynamic = "force-dynamic";
 
 // DDL / DML guard — same pattern as /api/dashboard/query
 const FORBIDDEN = /\b(insert|update|delete|drop|create|alter|merge|truncate|grant|revoke|call|begin|commit|export)\b/i;
 
-interface ModelRow {
-  id: string;
-  workspace_id: string;
-  user_id: string;
-  name: string;
-  description: string | null;
-  sql_query: string;
-  source_table: string | null;
-  source_dataset: string | null;
-  schema_json: string;
-  status: string;
-  tags: string;
-  created_at: number;
-  updated_at: number;
+type ModelRow = Omit<SemanticModel, "schema" | "tags_parsed" | "run_count" | "last_run_at" | "widget_count" | "dependencies">;
+
+/** Real SQL-parsed dependencies: which of this workspace's warehouse tables does sql_query reference? */
+function computeDependencies(sqlQuery: string, warehouseTables: string[]): string[] {
+  const refs = extractTableRefs(sqlQuery);
+  if (refs.length === 0) return [];
+  return warehouseTables.filter((t) => referencesTable(refs, t));
 }
 
-function parseModel(row: ModelRow) {
+function parseModel(row: ModelRow, warehouseTables: string[]) {
   return {
     ...row,
     schema: (() => { try { return JSON.parse(row.schema_json); } catch { return []; } })(),
     tags:   (() => { try { return JSON.parse(row.tags); }        catch { return []; } })(),
+    dependencies: computeDependencies(row.sql_query, warehouseTables),
   };
 }
 
@@ -62,8 +58,9 @@ export async function GET(req: NextRequest) {
   sql += " ORDER BY updated_at DESC";
 
   const rows = db.prepare(sql).all(...params) as ModelRow[];
+  const warehouseTables = (db.prepare("SELECT DISTINCT warehouse_table FROM flows WHERE workspace_id = ? AND warehouse_table IS NOT NULL").all(workspaceId) as { warehouse_table: string }[]).map((r) => r.warehouse_table);
 
-  return NextResponse.json({ ok: true, models: rows.map(parseModel) });
+  return NextResponse.json({ ok: true, models: rows.map((r) => parseModel(r, warehouseTables)) });
 }
 
 // ── POST — create model ───────────────────────────────────────────────────────
@@ -130,5 +127,5 @@ export async function POST(req: NextRequest) {
   );
 
   const created = db.prepare("SELECT * FROM models WHERE id = ?").get(id) as ModelRow;
-  return NextResponse.json({ ok: true, model: parseModel(created) }, { status: 201 });
+  return NextResponse.json({ ok: true, model: parseModel(created, []) }, { status: 201 });
 }

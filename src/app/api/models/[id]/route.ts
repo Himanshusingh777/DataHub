@@ -10,23 +10,28 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getAuthContext } from "@/lib/server/auth";
 import { getDb } from "@/lib/server/db";
+import { genId } from "@/lib/server/crypto";
+import { extractTableRefs, referencesTable } from "@/lib/server/sql-lineage";
+import type { SemanticModel } from "@/lib/models-data";
 
 export const dynamic = "force-dynamic";
 
 const FORBIDDEN = /\b(insert|update|delete|drop|create|alter|merge|truncate|grant|revoke|call|begin|commit|export)\b/i;
 
-interface ModelRow {
-  id: string; workspace_id: string; user_id: string; name: string;
-  description: string | null; sql_query: string; source_table: string | null;
-  source_dataset: string | null; schema_json: string; status: string;
-  tags: string; created_at: number; updated_at: number;
+type ModelRow = Omit<SemanticModel, "schema" | "tags_parsed" | "run_count" | "last_run_at" | "widget_count" | "dependencies">;
+
+function computeDependencies(sqlQuery: string, warehouseTables: string[]): string[] {
+  const refs = extractTableRefs(sqlQuery);
+  if (refs.length === 0) return [];
+  return warehouseTables.filter((t) => referencesTable(refs, t));
 }
 
-function parseModel(row: ModelRow) {
+function parseModel(row: ModelRow, warehouseTables: string[]) {
   return {
     ...row,
     schema: (() => { try { return JSON.parse(row.schema_json); } catch { return []; } })(),
     tags:   (() => { try { return JSON.parse(row.tags);        } catch { return []; } })(),
+    dependencies: computeDependencies(row.sql_query, warehouseTables),
   };
 }
 
@@ -56,12 +61,22 @@ export async function GET(
     ORDER BY ran_at DESC LIMIT 20
   `).all(id, workspaceId);
 
+  // Version history (last 20)
+  const versions = db.prepare(`
+    SELECT id, version, name, sql_query, created_at
+    FROM model_versions
+    WHERE model_id = ? AND workspace_id = ?
+    ORDER BY version DESC LIMIT 20
+  `).all(id, workspaceId);
+
   // Widget usage count
   const widgetCount = (db.prepare(
     "SELECT COUNT(*) as n FROM widgets WHERE model_id = ? AND workspace_id = ?"
   ).get(id, workspaceId) as { n: number }).n;
 
-  return NextResponse.json({ ok: true, model: parseModel(model), runs, widgetCount });
+  const warehouseTables = (db.prepare("SELECT DISTINCT warehouse_table FROM flows WHERE workspace_id = ? AND warehouse_table IS NOT NULL").all(workspaceId) as { warehouse_table: string }[]).map((r) => r.warehouse_table);
+
+  return NextResponse.json({ ok: true, model: parseModel(model, warehouseTables), runs, versions, widgetCount });
 }
 
 // ── PUT ───────────────────────────────────────────────────────────────────────
@@ -76,10 +91,10 @@ export async function PUT(
   const { id } = await params;
   const db = getDb();
 
-  // Verify ownership
+  // Verify ownership — load the full row so a SQL change can be snapshotted below.
   const existing = db.prepare(
-    "SELECT id FROM models WHERE id = ? AND workspace_id = ?"
-  ).get(id, workspaceId);
+    "SELECT id, name, description, sql_query, version FROM models WHERE id = ? AND workspace_id = ?"
+  ).get(id, workspaceId) as { id: string; name: string; description: string | null; sql_query: string; version: number } | undefined;
   if (!existing) return NextResponse.json({ ok: false, error: "Model not found" }, { status: 404 });
 
   let body: {
@@ -105,6 +120,18 @@ export async function PUT(
 
   const now = Date.now();
 
+  // Snapshot the pre-update SQL into version history before applying the
+  // change — only when the SQL actually changed, so tweaking just the name
+  // or status doesn't spam the version list with identical-SQL entries.
+  const sqlChanged = body.sql_query !== undefined && body.sql_query.trim() !== existing.sql_query;
+  const nextVersion = sqlChanged ? existing.version + 1 : existing.version;
+  if (sqlChanged) {
+    db.prepare(`
+      INSERT INTO model_versions (id, model_id, workspace_id, user_id, version, name, description, sql_query, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(genId("mdlv"), id, workspaceId, userId, existing.version, existing.name, existing.description, existing.sql_query, now);
+  }
+
   db.prepare(`
     UPDATE models SET
       name           = COALESCE(?, name),
@@ -115,6 +142,7 @@ export async function PUT(
       tags           = COALESCE(?, tags),
       status         = COALESCE(?, status),
       schema_json    = COALESCE(?, schema_json),
+      version        = ?,
       updated_at     = ?
     WHERE id = ? AND workspace_id = ?
   `).run(
@@ -129,12 +157,14 @@ export async function PUT(
     body.tags !== undefined ? JSON.stringify(body.tags) : null,
     body.status ?? null,
     body.schema_json ?? null,
+    nextVersion,
     now,
     id, workspaceId
   );
 
   const updated = db.prepare("SELECT * FROM models WHERE id = ?").get(id) as ModelRow;
-  return NextResponse.json({ ok: true, model: parseModel(updated) });
+  const warehouseTables = (db.prepare("SELECT DISTINCT warehouse_table FROM flows WHERE workspace_id = ? AND warehouse_table IS NOT NULL").all(workspaceId) as { warehouse_table: string }[]).map((r) => r.warehouse_table);
+  return NextResponse.json({ ok: true, model: parseModel(updated, warehouseTables) });
 }
 
 // ── DELETE ────────────────────────────────────────────────────────────────────
@@ -166,8 +196,9 @@ export async function DELETE(
     );
   }
 
-  // Delete model_runs first (no FK cascade on SQLite without PRAGMA foreign_keys)
+  // Delete dependents first (no FK cascade on SQLite without PRAGMA foreign_keys)
   db.prepare("DELETE FROM model_runs WHERE model_id = ?").run(id);
+  db.prepare("DELETE FROM model_versions WHERE model_id = ?").run(id);
   db.prepare("DELETE FROM bi_insights WHERE model_id = ?").run(id);
   db.prepare("DELETE FROM models WHERE id = ? AND workspace_id = ?").run(id, workspaceId);
 

@@ -342,6 +342,7 @@ function migrate(db: any) {
   addColumnIfMissing(db, "automations",   "next_run_at",  "INTEGER");
   addColumnIfMissing(db, "automations",   "last_fired_at", "INTEGER");
   addColumnIfMissing(db, "automations",   "last_status",  "TEXT"); // 'success' | 'error'
+  addColumnIfMissing(db, "models",        "version",      "INTEGER NOT NULL DEFAULT 1");
   addColumnIfMissing(db, "api_keys",      "workspace_id", "TEXT NOT NULL DEFAULT 'default'");
   addColumnIfMissing(db, "environments",  "workspace_id", "TEXT NOT NULL DEFAULT 'default'");
   // Augment catalog_tables to support multi-connector (not just BQ)
@@ -405,6 +406,21 @@ function migrate(db: any) {
     );
     CREATE INDEX IF NOT EXISTS idx_model_runs_model ON model_runs(model_id, ran_at DESC);
     CREATE INDEX IF NOT EXISTS idx_model_runs_ws    ON model_runs(workspace_id, ran_at DESC);
+
+    -- One row per saved SQL edit — snapshotted before each change so a
+    -- model's history can be viewed/restored (see PUT /api/models/[id]).
+    CREATE TABLE IF NOT EXISTS model_versions (
+      id           TEXT PRIMARY KEY,
+      model_id     TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      user_id      TEXT NOT NULL,
+      version      INTEGER NOT NULL,
+      name         TEXT NOT NULL,
+      description  TEXT,
+      sql_query    TEXT NOT NULL,
+      created_at   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_model_versions_model ON model_versions(model_id, version DESC);
 
     CREATE TABLE IF NOT EXISTS dashboards (
       id           TEXT PRIMARY KEY,

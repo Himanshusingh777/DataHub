@@ -39,6 +39,10 @@ export const ROUTES = {
   BI: "/bi",
   DASHBOARDS: "/dashboards",
   SHARED_DASHBOARD: (token: string) => `/dashboards/shared/${token}`,
+  // Semantic Models — versioned, reusable SQL that Dashboards/BI widgets
+  // are built on top of.
+  MODELS: "/models",
+  MODEL:  (id: string) => `/models/${id}`,
   // Data Catalog & Lineage (Phase B+C)
   CATALOG:    "/catalog",
   LINEAGE:    "/lineage",

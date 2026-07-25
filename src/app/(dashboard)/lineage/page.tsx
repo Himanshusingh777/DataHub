@@ -1,22 +1,23 @@
 "use client";
 
 /**
- * Lineage — real Source → Flow → Warehouse Table → Saved Query graph,
- * derived from actual flows and SQL-parsed saved queries. No mock data,
- * no synthetic downstream nodes for features that don't exist yet.
+ * Lineage — real Source → Flow → Warehouse Table → {Saved Query, Semantic
+ * Model} graph, derived from actual flows and SQL-parsed queries/models.
+ * No mock data, no synthetic downstream nodes for features that don't
+ * exist yet.
  *
  * Data source: GET /api/lineage (src/app/api/lineage/route.ts)
  */
 
 import React, { Suspense, lazy } from "react";
-import { Loader2, AlertTriangle, GitBranch, Database, Code2, ArrowRight } from "lucide-react";
+import { Loader2, AlertTriangle, GitBranch, Database, Code2, ArrowRight, Layers } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const EChartsReact = lazy(() => import("echarts-for-react"));
 
 // ── Types (mirror the API response shape) ────────────────────────────────────
 
-type NodeType = "connector" | "pipeline" | "warehouse" | "query";
+type NodeType = "connector" | "pipeline" | "warehouse" | "query" | "model";
 
 interface LineageNode { id: string; label: string; type: NodeType; subLabel?: string }
 interface LineageEdge { from: string; to: string; label?: string }
@@ -27,9 +28,10 @@ const NODE_STYLE: Record<NodeType, { color: string; icon: React.ElementType; cat
   pipeline:  { color: "#f59e0b", icon: ArrowRight, category: 1 },
   warehouse: { color: "#10b981", icon: Database, category: 2 },
   query:     { color: "#0ea5e9", icon: Code2, category: 3 },
+  model:     { color: "#a855f7", icon: Layers, category: 4 },
 };
 
-const CATEGORY_LABELS = ["Source", "Flow", "Warehouse Table", "Saved Query"];
+const CATEGORY_LABELS = ["Source", "Flow", "Warehouse Table", "Saved Query", "Semantic Model"];
 
 async function fetchLineage(): Promise<LineageGraph | null> {
   try {
@@ -122,7 +124,7 @@ export default function LineagePage() {
       <div>
         <h1 className="text-xl font-bold text-foreground">Lineage</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Source → Flow → Warehouse Table → Saved Query — traced from your real flows and SQL-parsed queries.
+          Source → Flow → Warehouse Table → Query / Model — traced from your real flows and SQL-parsed queries and models.
         </p>
       </div>
 
