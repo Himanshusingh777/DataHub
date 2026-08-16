@@ -14,12 +14,12 @@ import { getDb } from "@/lib/server/db";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
 
-  const dashboards = db.prepare(`
+  const dashboards = await db.prepare(`
     SELECT
       d.*,
       COUNT(w.id) as widget_count
@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   let body: { name?: string; description?: string; theme?: string };
@@ -49,11 +49,11 @@ export async function POST(req: NextRequest) {
   const now = Date.now();
 
   const db = getDb();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO dashboards (id, workspace_id, user_id, name, description, theme, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, workspaceId, userId, name.trim(), description ?? null, theme, now, now);
 
-  const created = db.prepare("SELECT * FROM dashboards WHERE id = ?").get(id);
+  const created = await db.prepare("SELECT * FROM dashboards WHERE id = ?").get(id);
   return NextResponse.json({ ok: true, dashboard: created }, { status: 201 });
 }

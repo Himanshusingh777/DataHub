@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
 
   const db = getDb();
 
-  const reset = db.prepare(`
+  const reset = await db.prepare(`
     SELECT r.token, r.user_id, r.expires_at
     FROM password_resets r
     WHERE r.token = ? AND r.expires_at > ?
@@ -34,11 +34,11 @@ export async function POST(req: NextRequest) {
   }
 
   const hashed = hashPassword(password);
-  db.prepare("UPDATE users SET pass_hash = ? WHERE id = ?").run(hashed, reset.user_id);
-  db.prepare("DELETE FROM password_resets WHERE user_id = ?").run(reset.user_id);
+  await db.prepare("UPDATE users SET pass_hash = ? WHERE id = ?").run(hashed, reset.user_id);
+  await db.prepare("DELETE FROM password_resets WHERE user_id = ?").run(reset.user_id);
 
   // Invalidate all existing sessions for security
-  db.prepare("DELETE FROM sessions WHERE user_id = ?").run(reset.user_id);
+  await db.prepare("DELETE FROM sessions WHERE user_id = ?").run(reset.user_id);
 
   return NextResponse.json({ ok: true });
 }

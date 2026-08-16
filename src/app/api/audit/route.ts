@@ -11,7 +11,7 @@ import { requirePermission } from "@/lib/server/permissions";
 
 export async function GET(req: NextRequest) {
   try {
-    const { userId, workspaceId } = getAuthContext(req);
+    const { userId, workspaceId } = await getAuthContext(req);
 
     // NOTE: role currently lives client-side only (see src/stores/auth.store.ts —
     // buildUser() hardcodes "admin"). Until roles are persisted server-side,
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
     const action = req.nextUrl.searchParams.get("action") ?? undefined;
     const limit = Number(req.nextUrl.searchParams.get("limit") ?? 100);
-    const entries = listAudit({ workspaceId, action, limit });
+    const entries = await listAudit({ workspaceId, action, limit });
 
     return NextResponse.json({
       ok: true,

@@ -23,9 +23,9 @@ export interface FlowRow {
   workspace_id?: string | null;
 }
 
-function getSrcCreds(userId: string, service: string): Record<string, string> | null {
+async function getSrcCreds(userId: string, service: string): Promise<Record<string, string> | null> {
   try {
-    const row = getDb().prepare("SELECT data FROM credentials WHERE user_id = ? AND service = ?").get(userId, service) as
+    const row = await getDb().prepare("SELECT data FROM credentials WHERE user_id = ? AND service = ?").get(userId, service) as
       | { data: string } | undefined;
     if (!row) return null;
     return JSON.parse(decrypt(row.data));
@@ -41,13 +41,13 @@ export async function runFlowSync(flow: FlowRow, triggerBy: "manual" | "schedule
     logs.push({ ts: new Date().toISOString(), level, message });
   const started = Date.now();
 
-  const finish = (status: "success" | "failed", rows: number | null, error?: string) => {
-    db.prepare(`
+  const finish = async (status: "success" | "failed", rows: number | null, error?: string) => {
+    await db.prepare(`
       INSERT INTO runs (id, flow_id, status, rows, duration_ms, error, logs, trigger_by, started_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(genId("run"), flow.id, status, rows, Date.now() - started, error ?? null, JSON.stringify(logs), triggerBy, started);
     // Advance the schedule regardless of outcome
-    db.prepare("UPDATE flows SET next_run_at = ?, status = ? WHERE id = ?")
+    await db.prepare("UPDATE flows SET next_run_at = ?, status = ? WHERE id = ?")
       .run(computeNextRun(flow.schedule_value), status === "failed" ? "error" : "active", flow.id);
   };
 
@@ -55,10 +55,10 @@ export async function runFlowSync(flow: FlowRow, triggerBy: "manual" | "schedule
     log("info", `Scheduled sync started (${triggerBy}). Source: ${flow.source_id} → ${flow.dest_id}.`);
 
     // Destination creds (BigQuery) — workspace-scoped with flow dataset override
-    const bq = resolveBqCredsForFlow(flow.user_id, flow.workspace_id ?? DEFAULT_WORKSPACE_ID, flow.dataset);
+    const bq = await resolveBqCredsForFlow(flow.user_id, flow.workspace_id ?? DEFAULT_WORKSPACE_ID, flow.dataset);
     if (!bq) {
       const err = "BigQuery credentials missing from vault";
-      log("error", err); finish("failed", null, err);
+      log("error", err); await finish("failed", null, err);
       return { ok: false, rows: 0, error: err };
     }
 
@@ -66,7 +66,7 @@ export async function runFlowSync(flow: FlowRow, triggerBy: "manual" | "schedule
     const adapter = await getAdapterAsync(flow.source_id);
     if (!adapter) {
       const err = `No adapter for connector "${flow.source_id}" — scheduled sync skipped`;
-      log("error", err); finish("failed", null, err);
+      log("error", err); await finish("failed", null, err);
       return { ok: false, rows: 0, error: err };
     }
     if (flow.source_id === "csv") {
@@ -74,15 +74,15 @@ export async function runFlowSync(flow: FlowRow, triggerBy: "manual" | "schedule
       // Mark the run as skipped (success with 0 rows) and advance next_run_at
       // so the scheduler doesn't hammer it endlessly.
       log("info", "CSV flow — no scheduled re-sync needed. Awaiting manual re-upload.");
-      finish("success", 0);
+      await finish("success", 0);
       return { ok: true, rows: 0 };
     }
 
     // Source creds
-    const srcCreds = getSrcCreds(flow.user_id, flow.source_id) ?? {};
+    const srcCreds = (await getSrcCreds(flow.user_id, flow.source_id)) ?? {};
     const authError = await adapter.authenticate(srcCreds);
     if (authError) {
-      log("error", authError); finish("failed", null, authError);
+      log("error", authError); await finish("failed", null, authError);
       return { ok: false, rows: 0, error: authError };
     }
 
@@ -127,24 +127,24 @@ export async function runFlowSync(flow: FlowRow, triggerBy: "manual" | "schedule
       // Safe to run every time — only updates if the column was NULL or changed.
       if (!flow.warehouse_table || flow.warehouse_table !== table) {
         try {
-          getDb().prepare("UPDATE flows SET warehouse_table = ? WHERE id = ?").run(table, flow.id);
+          await getDb().prepare("UPDATE flows SET warehouse_table = ? WHERE id = ?").run(table, flow.id);
           flow.warehouse_table = table; // update in-memory too for multi-object loops
         } catch { /* non-fatal */ }
       }
     }
 
     if (totalRows === 0) {
-      log("warn", "All objects returned 0 rows."); finish("success", 0);
+      log("warn", "All objects returned 0 rows."); await finish("success", 0);
       return { ok: true, rows: 0 };
     }
 
     log("success", `Sync complete — ${totalRows.toLocaleString()} total rows across ${objects.length} object(s).`);
-    finish("success", totalRows);
+    await finish("success", totalRows);
     return { ok: true, rows: totalRows };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     log("error", msg);
-    finish("failed", null, msg);
+    await finish("failed", null, msg);
     return { ok: false, rows: 0, error: msg };
   }
 }
@@ -171,12 +171,12 @@ export async function runFlowSyncIncremental(
     logs.push({ ts: new Date().toISOString(), level, message });
   const started = Date.now();
 
-  const finish = (status: "success" | "failed", rows: number | null, error?: string) => {
-    db.prepare(`
+  const finish = async (status: "success" | "failed", rows: number | null, error?: string) => {
+    await db.prepare(`
       INSERT INTO runs (id, flow_id, status, rows, duration_ms, error, logs, trigger_by, started_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(genId("run"), flow.id, status, rows, Date.now() - started, error ?? null, JSON.stringify(logs), triggerBy, started);
-    db.prepare("UPDATE flows SET next_run_at = ?, status = ? WHERE id = ?")
+    await db.prepare("UPDATE flows SET next_run_at = ?, status = ? WHERE id = ?")
       .run(computeNextRun(flow.schedule_value), status === "failed" ? "error" : "active", flow.id);
   };
 
@@ -187,39 +187,39 @@ export async function runFlowSyncIncremental(
     try { keyColumns = flow.key_columns ? JSON.parse(flow.key_columns) : []; } catch { keyColumns = []; }
     if (!keyColumns.length) {
       const err = "Incremental sync requires at least one key column configured on the flow (flows.key_columns)";
-      log("error", err); finish("failed", null, err);
+      log("error", err); await finish("failed", null, err);
       return { ok: false, rows: 0, error: err };
     }
 
-    const bq = resolveBqCredsForFlow(flow.user_id, flow.workspace_id ?? DEFAULT_WORKSPACE_ID, flow.dataset);
+    const bq = await resolveBqCredsForFlow(flow.user_id, flow.workspace_id ?? DEFAULT_WORKSPACE_ID, flow.dataset);
     if (!bq) {
       const err = "BigQuery credentials missing from vault";
-      log("error", err); finish("failed", null, err);
+      log("error", err); await finish("failed", null, err);
       return { ok: false, rows: 0, error: err };
     }
 
     const adapter = await getAdapterAsync(flow.source_id);
     if (!adapter) {
       const err = `No adapter for connector "${flow.source_id}" — incremental sync skipped`;
-      log("error", err); finish("failed", null, err);
+      log("error", err); await finish("failed", null, err);
       return { ok: false, rows: 0, error: err };
     }
     if (flow.source_id === "csv") {
       log("info", "CSV flow — incremental sync skipped. Awaiting manual re-upload.");
-      finish("success", 0);
+      await finish("success", 0);
       return { ok: true, rows: 0 };
     }
 
-    const srcCreds = getSrcCreds(flow.user_id, flow.source_id) ?? {};
+    const srcCreds = (await getSrcCreds(flow.user_id, flow.source_id)) ?? {};
     const authError = await adapter.authenticate(srcCreds);
     if (authError) {
-      log("error", authError); finish("failed", null, authError);
+      log("error", authError); await finish("failed", null, authError);
       return { ok: false, rows: 0, error: authError };
     }
 
     // Seed extraction from the stored watermark — first run has none, which
     // is equivalent to a full initial load (MERGE inserts everything as new).
-    const checkpoint = getCheckpoint(flow.id);
+    const checkpoint = await getCheckpoint(flow.id);
     if (checkpoint?.cursorValue) {
       log("info", `Resuming from checkpoint: ${checkpoint.cursorField} >= ${checkpoint.cursorValue}`);
     } else {
@@ -230,7 +230,7 @@ export async function runFlowSyncIncremental(
     const result = await adapter.extract(objectId, srcCreds, { startDate: checkpoint?.cursorValue ?? undefined }, log);
     if (!result.rows.length) {
       log("warn", "0 new/changed rows since last checkpoint.");
-      finish("success", 0);
+      await finish("success", 0);
       return { ok: true, rows: 0 };
     }
 
@@ -243,25 +243,25 @@ export async function runFlowSyncIncremental(
 
     // Keep warehouse_table in sync after a successful load
     if (!flow.warehouse_table || flow.warehouse_table !== table) {
-      try { getDb().prepare("UPDATE flows SET warehouse_table = ? WHERE id = ?").run(table, flow.id); } catch { /* non-fatal */ }
+      try { await getDb().prepare("UPDATE flows SET warehouse_table = ? WHERE id = ?").run(table, flow.id); } catch { /* non-fatal */ }
     }
 
     const nextWatermark = computeWatermark(result.rows);
     if (nextWatermark) {
-      setCheckpoint({ flowId: flow.id, cursorField: nextWatermark.field, cursorValue: nextWatermark.value, rowsThisRun: loadRes.rowsStaged });
+      await setCheckpoint({ flowId: flow.id, cursorField: nextWatermark.field, cursorValue: nextWatermark.value, rowsThisRun: loadRes.rowsStaged });
       log("info", `Checkpoint advanced: ${nextWatermark.field} = ${nextWatermark.value}`);
     } else {
       log("warn", "No date-like field found to advance the watermark — next run will re-scan this range.");
     }
 
     log("success", "Incremental sync complete.");
-    finish("success", loadRes.rowsStaged);
+    await finish("success", loadRes.rowsStaged);
     recordUsage({ workspaceId: flow.workspace_id ?? DEFAULT_WORKSPACE_ID, metric: "rows_synced", quantity: loadRes.rowsStaged });
     return { ok: true, rows: loadRes.rowsStaged };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     log("error", msg);
-    finish("failed", null, msg);
+    await finish("failed", null, msg);
     return { ok: false, rows: 0, error: msg };
   }
 }

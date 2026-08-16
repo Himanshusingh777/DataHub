@@ -12,7 +12,7 @@ import { getDb } from "@/lib/server/db";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   const days = parseInt(req.nextUrl.searchParams.get("days") ?? "30", 10) || 30;
   const since = Date.now() - days * 86_400_000;
 
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const db = getDb();
 
     // Total rows synced in window
-    const rowsRow = db.prepare(`
+    const rowsRow = await db.prepare(`
       SELECT COALESCE(SUM(r.rows), 0) AS total
       FROM runs r
       JOIN flows f ON f.id = r.flow_id
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     `).get(workspaceId, userId, since) as { total: number };
 
     // Success / total counts
-    const jobCounts = db.prepare(`
+    const jobCounts = await db.prepare(`
       SELECT
         COUNT(*) AS total,
         SUM(CASE WHEN r.status = 'success' THEN 1 ELSE 0 END) AS success,
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     `).get(workspaceId, userId, since) as { total: number; success: number; failed: number; avg_duration: number };
 
     // Active flows
-    const activeFlows = (db.prepare(`
+    const activeFlows = (await db.prepare(`
       SELECT COUNT(*) AS n FROM flows WHERE workspace_id = ? AND user_id = ? AND status = 'active'
     `).get(workspaceId, userId) as { n: number }).n;
 

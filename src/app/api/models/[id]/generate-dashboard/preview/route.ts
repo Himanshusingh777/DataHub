@@ -41,11 +41,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const identity = requestIdentity(req, userId);
-  const rl = checkRateLimit(rateLimitKey(identity, "ai-dashboard-preview"), RATE_LIMITS.warehouse);
+  const rl = await checkRateLimit(rateLimitKey(identity, "ai-dashboard-preview"), RATE_LIMITS.warehouse);
   if (!rl.allowed) {
     const r = rateLimitResponse(rl);
     return NextResponse.json(r.body, { status: r.status, headers: r.headers });
@@ -54,7 +54,7 @@ export async function POST(
   const { id } = await params;
   const db = getDb();
 
-  const model = db.prepare(
+  const model = await db.prepare(
     "SELECT id, name, sql_query, source_dataset, schema_json FROM models WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId) as {
     id: string; name: string; sql_query: string; source_dataset: string | null; schema_json: string;
@@ -70,7 +70,7 @@ export async function POST(
     );
   }
 
-  const bqCreds = resolveBqCreds(userId, workspaceId);
+  const bqCreds = await resolveBqCreds(userId, workspaceId);
   if (!bqCreds) {
     return NextResponse.json(
       { ok: false, notConfigured: true, error: "BigQuery credentials not configured." },

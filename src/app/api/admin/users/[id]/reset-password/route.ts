@@ -28,24 +28,24 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const admin = getSessionUser(req);
+  const admin = await getSessionUser(req);
   if (!admin || !ADMIN_EMAILS.includes(admin.email.toLowerCase()))
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
   const db = getDb();
 
-  const user = db.prepare("SELECT id, email FROM users WHERE id=?").get(id) as
+  const user = await db.prepare("SELECT id, email FROM users WHERE id=?").get(id) as
     { id: string; email: string } | undefined;
   if (!user) return NextResponse.json({ ok: false, error: "User not found" }, { status: 404 });
 
   const tempPassword = genTempPassword();
-  db.prepare("UPDATE users SET pass_hash=? WHERE id=?").run(hashPassword(tempPassword), id);
+  await db.prepare("UPDATE users SET pass_hash=? WHERE id=?").run(hashPassword(tempPassword), id);
 
   // Invalidate all sessions so the user must log in again with the new password
-  db.prepare("DELETE FROM sessions WHERE user_id=?").run(id);
+  await db.prepare("DELETE FROM sessions WHERE user_id=?").run(id);
 
-  writeAudit({
+  await writeAudit({
     userId: admin.id,
     action: "admin.reset_password",
     resource: user.email,

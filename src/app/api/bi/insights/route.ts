@@ -31,7 +31,7 @@ function flattenBqRow(r: Record<string, unknown>): Record<string, unknown> {
 // ── GET — list insights ───────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const url     = new URL(req.url);
@@ -51,8 +51,8 @@ export async function GET(req: NextRequest) {
   }
   sql += " ORDER BY bi.created_at DESC LIMIT 100";
 
-  const insights = db.prepare(sql).all(...args) as Array<Record<string, unknown>>;
-  const total    = (db.prepare("SELECT COUNT(*) as n FROM bi_insights WHERE workspace_id = ? AND dismissed = 0").get(workspaceId) as { n: number }).n;
+  const insights = await db.prepare(sql).all(...args) as Array<Record<string, unknown>>;
+  const total    = (await db.prepare("SELECT COUNT(*) as n FROM bi_insights WHERE workspace_id = ? AND dismissed = 0").get(workspaceId) as { n: number }).n;
 
   return NextResponse.json({ ok: true, insights, total });
 }
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
 // ── POST — trigger analysis on a model ───────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   let body: { model_id?: string };
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
   const db = getDb();
 
   // Verify model belongs to workspace
-  const model = db.prepare(
+  const model = await db.prepare(
     "SELECT id, name, sql_query, source_dataset FROM models WHERE id = ? AND workspace_id = ?"
   ).get(model_id, workspaceId) as {
     id: string; name: string; sql_query: string; source_dataset: string | null;
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
   if (!model) return NextResponse.json({ ok: false, error: "Model not found" }, { status: 404 });
 
   // Resolve BQ credentials
-  const bqCreds = resolveBqCreds(userId, workspaceId);
+  const bqCreds = await resolveBqCreds(userId, workspaceId);
   if (!bqCreds) {
     return NextResponse.json(
       { ok: false, notConfigured: true, error: "BigQuery credentials not configured." },
@@ -193,19 +193,16 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Persist insights ──────────────────────────────────────────────────
-    const insertStmt = db.prepare(`
-      INSERT INTO bi_insights
-        (id, workspace_id, model_id, type, title, description, data_json, severity, created_at, expires_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const insertMany = db.transaction((items: typeof generated) => {
-      for (const ins of items) {
-        insertStmt.run(ins.id, workspaceId, model_id, ins.type, ins.title, ins.description, ins.data_json, ins.severity, now, expires);
+    await db.transaction(async (tx) => {
+      const insertStmt = tx.prepare(`
+        INSERT INTO bi_insights
+          (id, workspace_id, model_id, type, title, description, data_json, severity, created_at, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const ins of generated) {
+        await insertStmt.run(ins.id, workspaceId, model_id, ins.type, ins.title, ins.description, ins.data_json, ins.severity, now, expires);
       }
     });
-
-    insertMany(generated);
 
     return NextResponse.json({
       ok:       true,

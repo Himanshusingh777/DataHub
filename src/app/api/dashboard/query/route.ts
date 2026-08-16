@@ -22,9 +22,9 @@ export const dynamic = "force-dynamic";
 const FORBIDDEN = /\b(insert|update|delete|drop|create|alter|merge|truncate|grant|revoke|call|begin|commit|export)\b/i;
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   // Workspace-scoped BQ credentials
-  const bqCreds = resolveBqCreds(userId, workspaceId);
+  const bqCreds = await resolveBqCreds(userId, workspaceId);
   if (!bqCreds) {
     return NextResponse.json(
       { ok: false, notConfigured: true, error: "BigQuery credentials not configured — add them in Settings." },

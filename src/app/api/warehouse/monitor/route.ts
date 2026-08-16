@@ -20,9 +20,9 @@ export const dynamic = "force-dynamic";
 
 /** GET — read credentials from vault server-side (preferred path) */
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
 
-  const rl = checkRateLimit(rateLimitKey(requestIdentity(req, userId), "warehouse"), RATE_LIMITS.warehouse);
+  const rl = await checkRateLimit(rateLimitKey(requestIdentity(req, userId), "warehouse"), RATE_LIMITS.warehouse);
   if (!rl.allowed) {
     const r = rateLimitResponse(rl);
     return NextResponse.json(r.body, { status: r.status, headers: r.headers });
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
 
   // Shared BQ credentials — admin sets up once, all users benefit
   try {
-    const bqCreds = resolveBqCreds(userId, workspaceId);
+    const bqCreds = await resolveBqCreds(userId, workspaceId);
     if (!bqCreds) {
       return NextResponse.json(
         { ok: false, notConfigured: true, error: "BigQuery credentials not configured — add them in Settings or during flow creation." },
@@ -58,10 +58,10 @@ export async function GET(req: NextRequest) {
 
 /** POST — explicit credentials (flow wizard / legacy path) */
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
-  resolveWorkspaceId(req, userId); // establishes tenant context for future per-workspace BQ creds
+  const { userId, workspaceId } = await getAuthContext(req);
+  await resolveWorkspaceId(req, userId); // establishes tenant context for future per-workspace BQ creds
 
-  const rl = checkRateLimit(rateLimitKey(requestIdentity(req, userId), "warehouse"), RATE_LIMITS.warehouse);
+  const rl = await checkRateLimit(rateLimitKey(requestIdentity(req, userId), "warehouse"), RATE_LIMITS.warehouse);
   if (!rl.allowed) {
     const r = rateLimitResponse(rl);
     return NextResponse.json(r.body, { status: r.status, headers: r.headers });

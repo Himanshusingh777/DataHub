@@ -13,17 +13,17 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    const { userId, workspaceId } = getAuthContext(req);
+    const { userId, workspaceId } = await getAuthContext(req);
     const db = getDb();
 
     // Flows
-    const flows = db.prepare("SELECT COUNT(*) as n FROM flows WHERE user_id = ?").get(userId) as { n: number };
-    const activeFlows = db.prepare("SELECT COUNT(*) as n FROM flows WHERE user_id = ? AND status = 'active'").get(userId) as { n: number };
+    const flows = await db.prepare("SELECT COUNT(*) as n FROM flows WHERE user_id = ?").get(userId) as { n: number };
+    const activeFlows = await db.prepare("SELECT COUNT(*) as n FROM flows WHERE user_id = ? AND status = 'active'").get(userId) as { n: number };
 
     // Recent runs (last 20)
-    const recentRuns = db.prepare(`
-      SELECT r.id, f.name as flowName, r.status, r.rows as rowsProcessed,
-             r.duration_ms as durationMs, r.started_at as startedAt, r.error
+    const recentRuns = await db.prepare(`
+      SELECT r.id, f.name as "flowName", r.status, r.rows as "rowsProcessed",
+             r.duration_ms as "durationMs", r.started_at as "startedAt", r.error
       FROM runs r
       JOIN flows f ON f.id = r.flow_id
       WHERE f.user_id = ?
@@ -33,17 +33,17 @@ export async function GET(req: NextRequest) {
 
     // Failed jobs (last 24h)
     const since = Date.now() - 86_400_000;
-    const failedJobs = db.prepare(
+    const failedJobs = await db.prepare(
       "SELECT COUNT(*) as n FROM runs r JOIN flows f ON f.id = r.flow_id WHERE f.user_id = ? AND r.status = 'failed' AND r.started_at > ?"
     ).get(userId, since) as { n: number };
 
     // Total rows synced
-    const totalRows = db.prepare(
+    const totalRows = await db.prepare(
       "SELECT SUM(r.rows) as total FROM runs r JOIN flows f ON f.id = r.flow_id WHERE f.user_id = ? AND r.status = 'success'"
     ).get(userId) as { total: number | null };
 
     // Last sync time — computed from started_at + duration_ms (no finished_at column)
-    const lastRun = db.prepare(
+    const lastRun = await db.prepare(
       "SELECT MAX(r.started_at + COALESCE(r.duration_ms, 0)) as t FROM runs r JOIN flows f ON f.id = r.flow_id WHERE f.user_id = ? AND r.status = 'success'"
     ).get(userId) as { t: number | null };
 
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
     // Warehouse table count (best-effort, don't fail dashboard if BQ is down)
     let warehouseTables = 0;
     try {
-      const creds = resolveBqCreds(userId, workspaceId);
+      const creds = await resolveBqCreds(userId, workspaceId);
       if (creds) {
         const bq = new BigQuery({ projectId: creds.projectId, credentials: creds.credentials });
         const [datasets] = await bq.getDatasets({ projectId: creds.projectId });

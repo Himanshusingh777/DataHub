@@ -75,14 +75,14 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const db = getDb();
 
   // ── Load widget (workspace-scoped) ─────────────────────────────────────────
-  const widget = db.prepare(
+  const widget = await db.prepare(
     "SELECT * FROM widgets WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId) as {
     id: string; model_id: string; chart_type: string;
@@ -91,7 +91,7 @@ export async function POST(
   if (!widget) return NextResponse.json({ ok: false, error: "Widget not found" }, { status: 404 });
 
   // ── Load model (workspace-scoped) ──────────────────────────────────────────
-  const model = db.prepare(
+  const model = await db.prepare(
     "SELECT id, name, sql_query, source_dataset FROM models WHERE id = ? AND workspace_id = ?"
   ).get(widget.model_id, workspaceId) as {
     id: string; name: string; sql_query: string; source_dataset: string | null;
@@ -103,7 +103,7 @@ export async function POST(
   try { body = await req.json(); } catch { /* no body is fine */ }
 
   // ── Resolve BQ credentials ─────────────────────────────────────────────────
-  const bqCreds = resolveBqCreds(userId, workspaceId);
+  const bqCreds = await resolveBqCreds(userId, workspaceId);
   if (!bqCreds) {
     return NextResponse.json(
       { ok: false, notConfigured: true, error: "BigQuery credentials not configured." },

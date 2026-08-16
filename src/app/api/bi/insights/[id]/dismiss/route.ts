@@ -16,19 +16,19 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const db = getDb();
 
-  const insight = db.prepare(
+  const insight = await db.prepare(
     "SELECT id FROM bi_insights WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId);
 
   if (!insight) return NextResponse.json({ ok: false, error: "Insight not found" }, { status: 404 });
 
-  db.prepare("UPDATE bi_insights SET dismissed = 1 WHERE id = ? AND workspace_id = ?")
+  await db.prepare("UPDATE bi_insights SET dismissed = 1 WHERE id = ? AND workspace_id = ?")
     .run(id, workspaceId);
 
   return NextResponse.json({ ok: true });

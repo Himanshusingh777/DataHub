@@ -8,10 +8,10 @@ import { getUserId } from "@/lib/server/auth";
 import { getDb } from "@/lib/server/db";
 import { decrypt } from "@/lib/server/crypto";
 
-function getInstantlyKey(userId: string): string | null {
+async function getInstantlyKey(userId: string): Promise<string | null> {
   try {
     const db = getDb();
-    const row = db
+    const row = await db
       .prepare("SELECT data FROM credentials WHERE user_id = ? AND service = 'instantly'")
       .get(userId) as { data: string } | undefined;
     if (!row) return null;
@@ -23,8 +23,8 @@ function getInstantlyKey(userId: string): string | null {
 }
 
 export async function GET(req: NextRequest) {
-  const userId = getUserId(req);
-  const key = getInstantlyKey(userId);
+  const userId = await getUserId(req);
+  const key = await getInstantlyKey(userId);
   const campaignId = req.nextUrl.searchParams.get("campaign_id") ?? undefined;
 
   if (!key) return NextResponse.json({ leads: [], demo: true });

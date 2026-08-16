@@ -53,7 +53,7 @@ export async function POST(
   const { token, widgetId } = await params;
 
   const identity = requestIdentity(req);
-  const rl = checkRateLimit(rateLimitKey(identity, "shared-widget-data"), RATE_LIMITS.warehouse);
+  const rl = await checkRateLimit(rateLimitKey(identity, "shared-widget-data"), RATE_LIMITS.warehouse);
   if (!rl.allowed) {
     const r = rateLimitResponse(rl);
     return NextResponse.json(r.body, { status: r.status, headers: r.headers });
@@ -61,24 +61,24 @@ export async function POST(
 
   const db = getDb();
 
-  const dashboard = db.prepare(
+  const dashboard = await db.prepare(
     "SELECT id, user_id, workspace_id FROM dashboards WHERE share_token = ? AND is_published = 1"
   ).get(token) as { id: string; user_id: string; workspace_id: string } | undefined;
   if (!dashboard) return NextResponse.json({ ok: false, error: "Dashboard not found or not published" }, { status: 404 });
 
-  const widget = db.prepare(
+  const widget = await db.prepare(
     "SELECT id, chart_type, config_json, model_id FROM widgets WHERE id = ? AND dashboard_id = ?"
   ).get(widgetId, dashboard.id) as { id: string; chart_type: string; config_json: string; model_id: string } | undefined;
   if (!widget) return NextResponse.json({ ok: false, error: "Widget not found on this dashboard" }, { status: 404 });
 
-  const model = db.prepare(
+  const model = await db.prepare(
     "SELECT sql_query, source_dataset FROM models WHERE id = ? AND workspace_id = ?"
   ).get(widget.model_id, dashboard.workspace_id) as { sql_query: string; source_dataset: string | null } | undefined;
   if (!model) return NextResponse.json({ ok: false, error: "Model not found for this widget" }, { status: 404 });
 
   // Resolved against the dashboard owner's workspace — there is no
   // requesting user for a public link.
-  const bqCreds = resolveBqCreds(dashboard.user_id, dashboard.workspace_id);
+  const bqCreds = await resolveBqCreds(dashboard.user_id, dashboard.workspace_id);
   if (!bqCreds) return NextResponse.json({ ok: false, error: "Warehouse not configured for this dashboard." }, { status: 404 });
 
   const baseSql = model.sql_query.trim().replace(/;+\s*$/, "");

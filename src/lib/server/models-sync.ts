@@ -13,7 +13,7 @@ import { validateReadOnlySql } from "./sql-safety";
 
 interface SyncParams {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: any; // better-sqlite3 instance — untyped, same as getDb()'s return
+  db: any; // pg-backed getDb() instance — untyped
 
   workspaceId: string;
   userId: string;
@@ -31,7 +31,7 @@ interface ModelLookupRow {
   version: number;
 }
 
-export function syncModelFromSavedQuery(params: SyncParams): void {
+export async function syncModelFromSavedQuery(params: SyncParams): Promise<void> {
   const { db, workspaceId, userId, savedQueryId, name, description, sql } = params;
 
   try {
@@ -41,7 +41,7 @@ export function syncModelFromSavedQuery(params: SyncParams): void {
     const now = Date.now();
 
     // Already synced from this saved query before — update it in place.
-    const linked = db.prepare(
+    const linked = await db.prepare(
       "SELECT id, name, description, sql_query, version FROM models WHERE source_saved_query_id = ? AND workspace_id = ?"
     ).get(savedQueryId, workspaceId) as ModelLookupRow | undefined;
 
@@ -49,12 +49,12 @@ export function syncModelFromSavedQuery(params: SyncParams): void {
       const sqlChanged = sql.trim() !== linked.sql_query;
       const nextVersion = sqlChanged ? linked.version + 1 : linked.version;
       if (sqlChanged) {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO model_versions (id, model_id, workspace_id, user_id, version, name, description, sql_query, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(genId("mdlv"), linked.id, workspaceId, userId, linked.version, linked.name, linked.description, linked.sql_query, now);
       }
-      db.prepare(`
+      await db.prepare(`
         UPDATE models SET name = ?, description = ?, sql_query = ?, version = ?, updated_at = ?
         WHERE id = ? AND workspace_id = ?
       `).run(name, description, sql.trim(), nextVersion, now, linked.id, workspaceId);
@@ -65,7 +65,7 @@ export function syncModelFromSavedQuery(params: SyncParams): void {
     // not-yet-linked model if one exists (avoids duplicate model names when
     // a query is saved under a name that already matches a manually-created
     // model); otherwise create a new one.
-    const sameName = db.prepare(
+    const sameName = await db.prepare(
       "SELECT id, name, description, sql_query, version FROM models WHERE name = ? AND workspace_id = ? AND source_saved_query_id IS NULL"
     ).get(name, workspaceId) as ModelLookupRow | undefined;
 
@@ -73,12 +73,12 @@ export function syncModelFromSavedQuery(params: SyncParams): void {
       const sqlChanged = sql.trim() !== sameName.sql_query;
       const nextVersion = sqlChanged ? sameName.version + 1 : sameName.version;
       if (sqlChanged) {
-        db.prepare(`
+        await db.prepare(`
           INSERT INTO model_versions (id, model_id, workspace_id, user_id, version, name, description, sql_query, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(genId("mdlv"), sameName.id, workspaceId, userId, sameName.version, sameName.name, sameName.description, sameName.sql_query, now);
       }
-      db.prepare(`
+      await db.prepare(`
         UPDATE models SET description = ?, sql_query = ?, version = ?, source_saved_query_id = ?, updated_at = ?
         WHERE id = ? AND workspace_id = ?
       `).run(description, sql.trim(), nextVersion, savedQueryId, now, sameName.id, workspaceId);
@@ -86,7 +86,7 @@ export function syncModelFromSavedQuery(params: SyncParams): void {
     }
 
     const id = `mdl_${genId("q").replace(/[^a-zA-Z0-9]/g, "")}`;
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO models
         (id, workspace_id, user_id, name, description, sql_query, source_saved_query_id, tags, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 'draft', ?, ?)

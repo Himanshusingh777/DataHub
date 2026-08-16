@@ -13,21 +13,21 @@ import { BigQuery } from "@google-cloud/bigquery";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   const db = getDb();
 
   // 1. All flows for this user (any workspace)
-  const flows = db.prepare(
+  const flows = await db.prepare(
     "SELECT id, user_id, workspace_id, source_id, dest_id, warehouse_table, status FROM flows WHERE user_id IN (?, 'local')"
   ).all(userId) as Record<string, unknown>[];
 
   // 2. Latest run for each flow
-  const runs = db.prepare(
+  const runs = await db.prepare(
     "SELECT flow_id, status, started_at, logs FROM runs ORDER BY started_at DESC LIMIT 20"
   ).all() as Record<string, unknown>[];
 
   // 3. Resolved BQ creds
-  const creds = resolveBqCreds(userId, workspaceId);
+  const creds = await resolveBqCreds(userId, workspaceId);
 
   // 4. List BQ datasets
   let bqDatasets: string[] = [];

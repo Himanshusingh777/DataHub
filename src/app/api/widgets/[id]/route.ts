@@ -15,13 +15,13 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const db = getDb();
 
-  const existing = db.prepare(
+  const existing = await db.prepare(
     "SELECT id, dashboard_id FROM widgets WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId) as { id: string; dashboard_id: string } | undefined;
   if (!existing) return NextResponse.json({ ok: false, error: "Widget not found" }, { status: 404 });
@@ -37,7 +37,7 @@ export async function PUT(
 
   // If model_id is being changed, verify it belongs to this workspace
   if (body.model_id) {
-    const model = db.prepare(
+    const model = await db.prepare(
       "SELECT id FROM models WHERE id = ? AND workspace_id = ?"
     ).get(body.model_id, workspaceId);
     if (!model) return NextResponse.json({ ok: false, error: "Model not found" }, { status: 404 });
@@ -47,7 +47,7 @@ export async function PUT(
     return NextResponse.json({ ok: false, error: `Unknown chart_type: "${body.chart_type}"` }, { status: 400 });
 
   const now = Date.now();
-  db.prepare(`
+  await db.prepare(`
     UPDATE widgets SET
       name          = COALESCE(?, name),
       chart_type    = COALESCE(?, chart_type),
@@ -67,9 +67,9 @@ export async function PUT(
   );
 
   // Touch dashboard
-  db.prepare("UPDATE dashboards SET updated_at = ? WHERE id = ?").run(now, existing.dashboard_id);
+  await db.prepare("UPDATE dashboards SET updated_at = ? WHERE id = ?").run(now, existing.dashboard_id);
 
-  const updated = db.prepare("SELECT * FROM widgets WHERE id = ?").get(id) as Record<string, unknown>;
+  const updated = await db.prepare("SELECT * FROM widgets WHERE id = ?").get(id) as Record<string, unknown>;
   return NextResponse.json({ ok: true, widget: updated });
 }
 
@@ -77,19 +77,19 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const db = getDb();
 
-  const existing = db.prepare(
+  const existing = await db.prepare(
     "SELECT id, dashboard_id FROM widgets WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId) as { id: string; dashboard_id: string } | undefined;
   if (!existing) return NextResponse.json({ ok: false, error: "Widget not found" }, { status: 404 });
 
-  db.prepare("DELETE FROM widgets WHERE id = ? AND workspace_id = ?").run(id, workspaceId);
-  db.prepare("UPDATE dashboards SET updated_at = ? WHERE id = ?").run(Date.now(), existing.dashboard_id);
+  await db.prepare("DELETE FROM widgets WHERE id = ? AND workspace_id = ?").run(id, workspaceId);
+  await db.prepare("UPDATE dashboards SET updated_at = ? WHERE id = ?").run(Date.now(), existing.dashboard_id);
 
   return NextResponse.json({ ok: true });
 }

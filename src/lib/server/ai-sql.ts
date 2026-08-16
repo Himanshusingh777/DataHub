@@ -132,13 +132,13 @@ async function getLiveWarehouseTables(
   userId: string,
   workspaceId: string
 ): Promise<{ ok: true; tables: LiveTable[]; projectId: string } | { ok: false; reason: "not_configured" | "warehouse_error"; error?: string }> {
-  const creds = resolveBqCreds(userId, workspaceId);
+  const creds = await resolveBqCreds(userId, workspaceId);
   if (!creds) return { ok: false, reason: "not_configured" };
 
   const db = getDb();
   const userIds = userId === LOCAL_UID ? [LOCAL_UID] : [userId, LOCAL_UID];
   const placeholders = userIds.map(() => "?").join(",");
-  const flowRows = db
+  const flowRows = await db
     .prepare(`SELECT dataset, warehouse_table, source_id FROM flows WHERE user_id IN (${placeholders})`)
     .all(...userIds) as { dataset: string | null; warehouse_table: string | null; source_id: string }[];
 
@@ -236,7 +236,7 @@ export async function buildSchemaContext(
   const relevantTables = (anyMatched ? scoredTables.filter((t) => t.score > 0) : scoredTables).slice(0, MAX_TABLES);
 
   const db = getDb();
-  const modelRows = db
+  const modelRows = await db
     .prepare(
       `SELECT name, description, sql_query FROM models
        WHERE workspace_id = ? AND status != 'archived'

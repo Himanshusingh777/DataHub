@@ -41,20 +41,20 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const db = getDb();
 
-  const model = db.prepare(
+  const model = await db.prepare(
     "SELECT * FROM models WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId) as ModelRow | undefined;
 
   if (!model) return NextResponse.json({ ok: false, error: "Model not found" }, { status: 404 });
 
   // Run history (last 20)
-  const runs = db.prepare(`
+  const runs = await db.prepare(`
     SELECT id, status, rows_returned, duration_ms, bytes_processed, error, ran_at
     FROM model_runs
     WHERE model_id = ? AND workspace_id = ?
@@ -62,7 +62,7 @@ export async function GET(
   `).all(id, workspaceId);
 
   // Version history (last 20)
-  const versions = db.prepare(`
+  const versions = await db.prepare(`
     SELECT id, version, name, sql_query, created_at
     FROM model_versions
     WHERE model_id = ? AND workspace_id = ?
@@ -70,11 +70,11 @@ export async function GET(
   `).all(id, workspaceId);
 
   // Widget usage count
-  const widgetCount = (db.prepare(
+  const widgetCount = (await db.prepare(
     "SELECT COUNT(*) as n FROM widgets WHERE model_id = ? AND workspace_id = ?"
   ).get(id, workspaceId) as { n: number }).n;
 
-  const warehouseTables = (db.prepare("SELECT DISTINCT warehouse_table FROM flows WHERE workspace_id = ? AND warehouse_table IS NOT NULL").all(workspaceId) as { warehouse_table: string }[]).map((r) => r.warehouse_table);
+  const warehouseTables = (await db.prepare("SELECT DISTINCT warehouse_table FROM flows WHERE workspace_id = ? AND warehouse_table IS NOT NULL").all(workspaceId) as { warehouse_table: string }[]).map((r) => r.warehouse_table);
 
   return NextResponse.json({ ok: true, model: parseModel(model, warehouseTables), runs, versions, widgetCount });
 }
@@ -85,14 +85,14 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const db = getDb();
 
   // Verify ownership — load the full row so a SQL change can be snapshotted below.
-  const existing = db.prepare(
+  const existing = await db.prepare(
     "SELECT id, name, description, sql_query, version FROM models WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId) as { id: string; name: string; description: string | null; sql_query: string; version: number } | undefined;
   if (!existing) return NextResponse.json({ ok: false, error: "Model not found" }, { status: 404 });
@@ -126,13 +126,13 @@ export async function PUT(
   const sqlChanged = body.sql_query !== undefined && body.sql_query.trim() !== existing.sql_query;
   const nextVersion = sqlChanged ? existing.version + 1 : existing.version;
   if (sqlChanged) {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO model_versions (id, model_id, workspace_id, user_id, version, name, description, sql_query, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(genId("mdlv"), id, workspaceId, userId, existing.version, existing.name, existing.description, existing.sql_query, now);
   }
 
-  db.prepare(`
+  await db.prepare(`
     UPDATE models SET
       name           = COALESCE(?, name),
       description    = CASE WHEN ? IS NOT NULL THEN ? ELSE description END,
@@ -162,8 +162,8 @@ export async function PUT(
     id, workspaceId
   );
 
-  const updated = db.prepare("SELECT * FROM models WHERE id = ?").get(id) as ModelRow;
-  const warehouseTables = (db.prepare("SELECT DISTINCT warehouse_table FROM flows WHERE workspace_id = ? AND warehouse_table IS NOT NULL").all(workspaceId) as { warehouse_table: string }[]).map((r) => r.warehouse_table);
+  const updated = await db.prepare("SELECT * FROM models WHERE id = ?").get(id) as ModelRow;
+  const warehouseTables = (await db.prepare("SELECT DISTINCT warehouse_table FROM flows WHERE workspace_id = ? AND warehouse_table IS NOT NULL").all(workspaceId) as { warehouse_table: string }[]).map((r) => r.warehouse_table);
   return NextResponse.json({ ok: true, model: parseModel(updated, warehouseTables) });
 }
 
@@ -173,19 +173,19 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const db = getDb();
 
-  const existing = db.prepare(
+  const existing = await db.prepare(
     "SELECT id FROM models WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId);
   if (!existing) return NextResponse.json({ ok: false, error: "Model not found" }, { status: 404 });
 
   // Check for widgets using this model
-  const widgetCount = (db.prepare(
+  const widgetCount = (await db.prepare(
     "SELECT COUNT(*) as n FROM widgets WHERE model_id = ? AND workspace_id = ?"
   ).get(id, workspaceId) as { n: number }).n;
 
@@ -196,11 +196,12 @@ export async function DELETE(
     );
   }
 
-  // Delete dependents first (no FK cascade on SQLite without PRAGMA foreign_keys)
-  db.prepare("DELETE FROM model_runs WHERE model_id = ?").run(id);
-  db.prepare("DELETE FROM model_versions WHERE model_id = ?").run(id);
-  db.prepare("DELETE FROM bi_insights WHERE model_id = ?").run(id);
-  db.prepare("DELETE FROM models WHERE id = ? AND workspace_id = ?").run(id, workspaceId);
+  // Delete dependents first (Postgres FK cascade isn't declared for these —
+  // matches the original SQLite behavior of manual ordered deletes).
+  await db.prepare("DELETE FROM model_runs WHERE model_id = ?").run(id);
+  await db.prepare("DELETE FROM model_versions WHERE model_id = ?").run(id);
+  await db.prepare("DELETE FROM bi_insights WHERE model_id = ?").run(id);
+  await db.prepare("DELETE FROM models WHERE id = ? AND workspace_id = ?").run(id, workspaceId);
 
   return NextResponse.json({ ok: true });
 }

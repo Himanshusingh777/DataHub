@@ -43,7 +43,7 @@ const WORKSPACE_COOKIE = "ct_workspace";
  * Priority: explicit header (API clients) > cookie (browser) > user's first
  * owned workspace > the implicit default workspace.
  */
-export function resolveWorkspaceId(req: NextRequest, userId: string): string {
+export async function resolveWorkspaceId(req: NextRequest, userId: string): Promise<string> {
   const header = req.headers.get(WORKSPACE_HEADER);
   if (header) return header;
 
@@ -52,7 +52,7 @@ export function resolveWorkspaceId(req: NextRequest, userId: string): string {
 
   try {
     const db = getDb();
-    const row = db
+    const row = await db
       .prepare("SELECT id FROM workspaces WHERE owner_id = ? ORDER BY created_at ASC LIMIT 1")
       .get(userId) as { id: string } | undefined;
     if (row) return row.id;
@@ -63,30 +63,30 @@ export function resolveWorkspaceId(req: NextRequest, userId: string): string {
   return DEFAULT_WORKSPACE_ID;
 }
 
-export function createWorkspace(ownerId: string, name: string, plan = "free"): WorkspaceRow {
+export async function createWorkspace(ownerId: string, name: string, plan = "free"): Promise<WorkspaceRow> {
   const db = getDb();
   const id = genId("ws");
   const slug = slugify(name);
   const created_at = Date.now();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO workspaces (id, owner_id, name, slug, plan, created_at) VALUES (?, ?, ?, ?, ?, ?)
   `).run(id, ownerId, name, slug, plan, created_at);
   return { id, owner_id: ownerId, name, slug, plan, created_at };
 }
 
-export function listWorkspaces(ownerId: string): WorkspaceRow[] {
+export async function listWorkspaces(ownerId: string): Promise<WorkspaceRow[]> {
   return getDb()
     .prepare("SELECT * FROM workspaces WHERE owner_id = ? ORDER BY created_at ASC")
-    .all(ownerId) as WorkspaceRow[];
+    .all(ownerId) as Promise<WorkspaceRow[]>;
 }
 
-export function getWorkspace(id: string): WorkspaceRow | null {
-  const row = getDb().prepare("SELECT * FROM workspaces WHERE id = ?").get(id) as WorkspaceRow | undefined;
+export async function getWorkspace(id: string): Promise<WorkspaceRow | null> {
+  const row = await getDb().prepare("SELECT * FROM workspaces WHERE id = ?").get(id) as WorkspaceRow | undefined;
   return row ?? null;
 }
 
-export function renameWorkspace(id: string, ownerId: string, name: string): boolean {
-  const res = getDb()
+export async function renameWorkspace(id: string, ownerId: string, name: string): Promise<boolean> {
+  const res = await getDb()
     .prepare("UPDATE workspaces SET name = ? WHERE id = ? AND owner_id = ?")
     .run(name, id, ownerId);
   return res.changes > 0;
@@ -97,24 +97,24 @@ export function renameWorkspace(id: string, ownerId: string, name: string): bool
  * all existing rows from the implicit "default" workspace to the real one.
  * Safe to call on every login — the SELECT fast-paths out if the workspace exists.
  */
-export function ensureUserWorkspace(userId: string, name?: string): string {
+export async function ensureUserWorkspace(userId: string, name?: string): Promise<string> {
   const db = getDb();
 
   // Find the user's workspace: first as owner, then as member (admin-created users)
-  const ownedWs = db
+  const ownedWs = await db
     .prepare("SELECT id FROM workspaces WHERE owner_id = ? ORDER BY created_at ASC LIMIT 1")
     .get(userId) as { id: string } | undefined;
 
   const memberWs = ownedWs
     ? undefined
-    : db.prepare("SELECT workspace_id AS id FROM workspace_members WHERE user_id = ? ORDER BY joined_at ASC LIMIT 1")
+    : await db.prepare("SELECT workspace_id AS id FROM workspace_members WHERE user_id = ? ORDER BY joined_at ASC LIMIT 1")
         .get(userId) as { id: string } | undefined;
 
   const existing = ownedWs ?? memberWs;
 
   const wid = existing
     ? existing.id
-    : createWorkspace(userId, name ?? "My Workspace").id;
+    : (await createWorkspace(userId, name ?? "My Workspace")).id;
 
   // Always migrate any rows still stuck on 'default' → the user's real workspace.
   // This is idempotent (WHERE workspace_id = 'default') so safe to run on every login.
@@ -126,20 +126,20 @@ export function ensureUserWorkspace(userId: string, name?: string): string {
   ];
   for (const t of TABLES_WITH_USER_ID) {
     try {
-      db.prepare(
+      await db.prepare(
         `UPDATE ${t} SET workspace_id = ? WHERE user_id = ? AND workspace_id = 'default'`
       ).run(wid, userId);
     } catch { /* column may not exist on older schemas — ignore */ }
   }
 
   try {
-    db.prepare(
+    await db.prepare(
       "UPDATE api_keys SET workspace_id = ? WHERE user_id = ? AND (workspace_id = 'default' OR workspace_id IS NULL)"
     ).run(wid, userId);
   } catch { /* ignore */ }
 
   try {
-    db.prepare(
+    await db.prepare(
       "UPDATE audit_log SET workspace_id = ? WHERE user_id = ? AND workspace_id = 'default'"
     ).run(wid, userId);
   } catch { /* ignore */ }
@@ -149,12 +149,12 @@ export function ensureUserWorkspace(userId: string, name?: string): string {
   // This is a self-healing migration: runs once after the first sync, makes
   // Intelligence/Warehouse pages show data without requiring another sync.
   try {
-    const nullFlows = db.prepare(
+    const nullFlows = await db.prepare(
       "SELECT id FROM flows WHERE user_id = ? AND warehouse_table IS NULL"
     ).all(userId) as { id: string }[];
 
     for (const { id: flowId } of nullFlows) {
-      const latestRun = db.prepare(
+      const latestRun = await db.prepare(
         "SELECT logs FROM runs WHERE flow_id = ? AND status = 'success' ORDER BY started_at DESC LIMIT 1"
       ).get(flowId) as { logs: string } | undefined;
       if (!latestRun?.logs) continue;
@@ -163,7 +163,7 @@ export function ensureUserWorkspace(userId: string, name?: string): string {
         for (const entry of logs) {
           const m = entry.message?.match(/Loaded \d+ rows → (\S+)/);
           if (m?.[1]) {
-            db.prepare("UPDATE flows SET warehouse_table = ? WHERE id = ?").run(m[1], flowId);
+            await db.prepare("UPDATE flows SET warehouse_table = ? WHERE id = ?").run(m[1], flowId);
             break;
           }
         }
@@ -179,7 +179,7 @@ export function ensureUserWorkspace(userId: string, name?: string): string {
  * For authenticated users, always returns their personal workspace (never "default").
  * Falls back to DEFAULT_WORKSPACE_ID only for the anonymous demo user.
  */
-export function getWorkspaceForRequest(req: NextRequest, userId: string): string {
+export async function getWorkspaceForRequest(req: NextRequest, userId: string): Promise<string> {
   if (userId === DEFAULT_WORKSPACE_ID || userId === "local") return DEFAULT_WORKSPACE_ID;
 
   // Explicit override (API clients / admin cross-workspace access)
@@ -193,15 +193,15 @@ export function getWorkspaceForRequest(req: NextRequest, userId: string): string
   return ensureUserWorkspace(userId);
 }
 
-export function deleteWorkspace(id: string, ownerId: string): boolean {
+export async function deleteWorkspace(id: string, ownerId: string): Promise<boolean> {
   if (id === DEFAULT_WORKSPACE_ID) return false; // the implicit workspace can't be deleted
   const db = getDb();
-  const res = db.prepare("DELETE FROM workspaces WHERE id = ? AND owner_id = ?").run(id, ownerId);
+  const res = await db.prepare("DELETE FROM workspaces WHERE id = ? AND owner_id = ?").run(id, ownerId);
   if (res.changes > 0) {
     // Orphaned scoped rows fall back to the default workspace rather than
     // vanishing — deleting a workspace never deletes a customer's data.
     for (const table of ["flows", "credentials", "jobs", "audit_log", "usage_events", "api_keys"]) {
-      db.prepare(`UPDATE ${table} SET workspace_id = ? WHERE workspace_id = ?`).run(DEFAULT_WORKSPACE_ID, id);
+      await db.prepare(`UPDATE ${table} SET workspace_id = ? WHERE workspace_id = ?`).run(DEFAULT_WORKSPACE_ID, id);
     }
   }
   return res.changes > 0;

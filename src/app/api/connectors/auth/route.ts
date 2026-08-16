@@ -12,7 +12,7 @@ import { getAdapterAsync } from "@/lib/server/connectors";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
-  const { userId } = getAuthContext(req);
+  const { userId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   let body: { connectorId?: string; creds?: Record<string, string> };

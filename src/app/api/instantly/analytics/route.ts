@@ -36,10 +36,10 @@ export async function GET(req: NextRequest) {
   const endDate   = req.nextUrl.searchParams.get("end_date")   ?? "";
 
   // Read API key from server-side vault — never from query params
-  const userId = getUserId(req);
+  const userId = await getUserId(req);
   let key = "";
   try {
-    const row = getDb()
+    const row = await getDb()
       .prepare("SELECT data FROM credentials WHERE user_id = ? AND service = 'instantly'")
       .get(userId) as { data: string } | undefined;
     if (row) {

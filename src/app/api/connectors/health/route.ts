@@ -15,7 +15,7 @@ interface HealthEntry {
 }
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   initRegistry();
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
         // this service in the whole table" with no scoping, which leaked
         // other tenants' credentials into a workspace that had none of its
         // own configured — the same class of bug fixed in bq-creds.ts.)
-        const row = db.prepare(
+        const row = await db.prepare(
           "SELECT data FROM credentials WHERE user_id = ? AND workspace_id = ? AND service = ? LIMIT 1"
         ).get(userId, workspaceId, id) as { data: string } | undefined;
 

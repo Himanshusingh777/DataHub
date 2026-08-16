@@ -7,14 +7,14 @@ import { randomUUID } from "crypto";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
-  const queries = db.prepare(`
+  const queries = await db.prepare(`
     SELECT id, name, description, sql, tags,
-           datetime(created_at / 1000, 'unixepoch') AS createdAt,
-           datetime(updated_at / 1000, 'unixepoch') AS updatedAt
+           to_timestamp(created_at / 1000.0) AS "createdAt",
+           to_timestamp(updated_at / 1000.0) AS "updatedAt"
     FROM saved_queries
     WHERE user_id = ? AND workspace_id = ?
     ORDER BY updated_at DESC
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json() as { name?: string; description?: string; sql?: string; tags?: string[] };
@@ -36,18 +36,18 @@ export async function POST(req: NextRequest) {
   const id = randomUUID();
   const now = Date.now();
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO saved_queries (id, user_id, workspace_id, name, description, sql, tags, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, userId, workspaceId, body.name.trim(), body.description ?? null, body.sql.trim(), JSON.stringify(body.tags ?? []), now, now);
 
   // Every saved query is also kept as a Semantic Model, so it's immediately
   // usable on dashboards without a separate "create model" step.
-  syncModelFromSavedQuery({
+  await syncModelFromSavedQuery({
     db, workspaceId, userId, savedQueryId: id,
     name: body.name.trim(), description: body.description ?? null, sql: body.sql.trim(),
   });
 
-  const query = db.prepare("SELECT * FROM saved_queries WHERE id = ?").get(id);
+  const query = await db.prepare("SELECT * FROM saved_queries WHERE id = ?").get(id);
   return NextResponse.json({ query });
 }

@@ -28,7 +28,7 @@ interface Rec {
 }
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
   const since7d = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
   // 1. Dead jobs — scoped to this workspace
-  const deadJobs = db.prepare(
+  const deadJobs = await db.prepare(
     "SELECT COUNT(*) AS cnt FROM jobs WHERE status='dead' AND workspace_id = ?"
   ).get(workspaceId) as { cnt: number };
   if (deadJobs.cnt > 0) {
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
   }
 
   // 2. High-error flows
-  const errorFlows = db.prepare(`
+  const errorFlows = await db.prepare(`
     SELECT f.source_name, COUNT(*) AS total,
            SUM(CASE WHEN r.status='error' THEN 1 ELSE 0 END) AS errors
     FROM runs r JOIN flows f ON f.id = r.flow_id
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
   }
 
   // 3. Stale catalog tables (freshness_hours > 48)
-  const staleTables = db.prepare(`
+  const staleTables = await db.prepare(`
     SELECT table_name, freshness_hours, connector_id
     FROM catalog_tables WHERE user_id = ? AND freshness_hours > 48
     LIMIT 5

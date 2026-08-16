@@ -21,14 +21,14 @@ export async function GET(
 
   const db = getDb();
 
-  const dashboard = db.prepare(
+  const dashboard = await db.prepare(
     "SELECT id, name, description, theme, is_published, created_at, updated_at FROM dashboards WHERE share_token = ? AND is_published = 1"
   ).get(token) as { id: string; name: string; description: string | null; theme: string; is_published: number; created_at: number; updated_at: number } | undefined;
 
   if (!dashboard) return NextResponse.json({ ok: false, error: "Dashboard not found or not published" }, { status: 404 });
 
   // Return widgets — workspace_id is not leaked
-  const widgets = db.prepare(`
+  const widgets = await db.prepare(`
     SELECT w.id, w.name, w.chart_type, w.config_json, w.position_json,
            m.name as model_name
     FROM widgets w

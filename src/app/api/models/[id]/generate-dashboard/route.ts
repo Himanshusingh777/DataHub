@@ -40,11 +40,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const identity = requestIdentity(req, userId);
-  const rl = checkRateLimit(rateLimitKey(identity, "ai-dashboard-generate"), RATE_LIMITS.warehouse);
+  const rl = await checkRateLimit(rateLimitKey(identity, "ai-dashboard-generate"), RATE_LIMITS.warehouse);
   if (!rl.allowed) {
     const r = rateLimitResponse(rl);
     return NextResponse.json(r.body, { status: r.status, headers: r.headers });
@@ -53,7 +53,7 @@ export async function POST(
   const { id } = await params;
   const db = getDb();
 
-  const model = db.prepare(
+  const model = await db.prepare(
     "SELECT id, name FROM models WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId) as { id: string; name: string } | undefined;
   if (!model) return NextResponse.json({ ok: false, error: "Model not found" }, { status: 404 });
@@ -77,8 +77,8 @@ export async function POST(
   const dashboardId  = `dsh_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   const dashboardName = `${model.name} — AI Dashboard`;
 
-  const insertAll = db.transaction(() => {
-    db.prepare(`
+  await db.transaction(async (tx) => {
+    await tx.prepare(`
       INSERT INTO dashboards (id, workspace_id, user_id, name, description, theme, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -89,7 +89,7 @@ export async function POST(
 
     for (const spec of widgetSpecs) {
       const widgetId = `wgt_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO widgets
           (id, dashboard_id, workspace_id, model_id, name, chart_type, config_json, position_json, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -102,9 +102,8 @@ export async function POST(
       );
     }
   });
-  insertAll();
 
-  writeAudit({
+  await writeAudit({
     workspaceId, userId, action: "dashboard.ai_generated", resource: dashboardId,
     meta: { modelId: model.id, modelName: model.name, widgetCount: widgetSpecs.length },
     ip: clientIp(req),

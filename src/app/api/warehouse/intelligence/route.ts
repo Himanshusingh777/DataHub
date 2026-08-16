@@ -133,7 +133,7 @@ async function exec(
 }
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
 
   let body: Body;
   try {
@@ -152,7 +152,7 @@ export async function POST(req: NextRequest) {
 
   if (!projectId || !dataset || !body.serviceJson) {
     // Read from vault — workspace-scoped BQ credentials
-    const bqCreds = resolveBqCreds(userId, workspaceId);
+    const bqCreds = await resolveBqCreds(userId, workspaceId);
     if (!bqCreds) {
       return NextResponse.json(
         { ok: false, notConfigured: true, error: "BigQuery credentials not configured — add them in Settings or during flow creation." },
@@ -210,7 +210,7 @@ export async function POST(req: NextRequest) {
       const db = getDb();
       // Each user/workspace sees only their own tables.
       let userFlowTables = (
-        db.prepare("SELECT warehouse_table FROM flows WHERE user_id = ? AND workspace_id = ? AND warehouse_table IS NOT NULL")
+        await db.prepare("SELECT warehouse_table FROM flows WHERE user_id = ? AND workspace_id = ? AND warehouse_table IS NOT NULL")
           .all(userId, workspaceId) as { warehouse_table: string }[]
       ).map((r) => r.warehouse_table);
 
@@ -219,11 +219,11 @@ export async function POST(req: NextRequest) {
       // This makes Intelligence/Warehouse work after the first sync without a page reload.
       if (userFlowTables.length === 0) {
         try {
-          const nullFlows = db.prepare(
+          const nullFlows = await db.prepare(
             "SELECT id FROM flows WHERE user_id = ? AND workspace_id = ?"
           ).all(userId, workspaceId) as { id: string }[];
           for (const { id: fid } of nullFlows) {
-            const latestRun = db.prepare(
+            const latestRun = await db.prepare(
               "SELECT logs FROM runs WHERE flow_id = ? AND status = 'success' ORDER BY started_at DESC LIMIT 1"
             ).get(fid) as { logs: string } | undefined;
             if (!latestRun?.logs) continue;
@@ -232,7 +232,7 @@ export async function POST(req: NextRequest) {
               for (const entry of logs) {
                 const m = entry.message?.match(/Loaded \d+ rows → (\S+)/);
                 if (m?.[1]) {
-                  db.prepare("UPDATE flows SET warehouse_table = ? WHERE id = ?").run(m[1], fid);
+                  await db.prepare("UPDATE flows SET warehouse_table = ? WHERE id = ?").run(m[1], fid);
                   userFlowTables.push(m[1]);
                   break;
                 }

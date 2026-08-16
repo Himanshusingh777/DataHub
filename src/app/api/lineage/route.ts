@@ -37,12 +37,12 @@ interface LineageEdge {
 }
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
 
-  const flows = db.prepare(`
+  const flows = await db.prepare(`
     SELECT id, name, source_id, source_name, dest_id, dest_name, warehouse_table, status
     FROM flows WHERE user_id = ? AND workspace_id = ? ORDER BY created_at DESC
   `).all(userId, workspaceId) as Array<{
@@ -50,11 +50,11 @@ export async function GET(req: NextRequest) {
     dest_id: string; dest_name: string | null; warehouse_table: string | null; status: string;
   }>;
 
-  const savedQueries = db.prepare(`
+  const savedQueries = await db.prepare(`
     SELECT id, name, sql FROM saved_queries WHERE user_id = ? AND workspace_id = ?
   `).all(userId, workspaceId) as Array<{ id: string; name: string; sql: string }>;
 
-  const models = db.prepare(`
+  const models = await db.prepare(`
     SELECT id, name, sql_query FROM models WHERE user_id = ? AND workspace_id = ? AND status != 'archived'
   `).all(userId, workspaceId) as Array<{ id: string; name: string; sql_query: string }>;
 

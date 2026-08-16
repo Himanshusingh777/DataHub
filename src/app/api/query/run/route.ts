@@ -30,7 +30,7 @@ interface WarehouseCreds {
 }
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json() as { sql?: string };
@@ -51,14 +51,14 @@ export async function POST(req: NextRequest) {
   const queryId = randomUUID();
 
   // Record pending history entry
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO query_history (id, user_id, workspace_id, sql, status, created_at)
     VALUES (?, ?, ?, ?, 'running', ?)
   `).run(queryId, userId, workspaceId, sql, Date.now());
 
   try {
     // Get BigQuery credentials from vault (column is `data`, not `encrypted_value`)
-    const row = db.prepare(
+    const row = await db.prepare(
       "SELECT data FROM credentials WHERE user_id = ? AND service = 'bigquery' LIMIT 1"
     ).get(userId) as { data: string } | undefined;
 
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
         bytesProcessed: 0,
         durationMs: Date.now() - startTime,
       };
-      db.prepare("UPDATE query_history SET status='success', rows_returned=1, duration_ms=? WHERE id=?")
+      await db.prepare("UPDATE query_history SET status='success', rows_returned=1, duration_ms=? WHERE id=?")
         .run(demoResult.durationMs, queryId);
       return NextResponse.json({ result: demoResult, demo: true });
     }
@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
       durationMs,
     };
 
-    db.prepare(`
+    await db.prepare(`
       UPDATE query_history
       SET status='success', rows_returned=?, bytes_processed=?, duration_ms=?, result_json=?
       WHERE id=?
@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
   } catch (e: unknown) {
     const msg = (e as Error).message ?? String(e);
     const durationMs = Date.now() - startTime;
-    db.prepare("UPDATE query_history SET status='error', duration_ms=?, error=? WHERE id=?")
+    await db.prepare("UPDATE query_history SET status='error', duration_ms=?, error=? WHERE id=?")
       .run(durationMs, msg, queryId);
     return NextResponse.json({ error: msg }, { status: 400 });
   }

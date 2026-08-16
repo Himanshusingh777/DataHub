@@ -36,7 +36,7 @@ export function registerHandler(type: JobType, handler: JobHandler): void {
 registerHandler("sync_flow", async (payload) => {
   const flowId = String(payload.flowId ?? "");
   const db = getDb();
-  const flow = db.prepare("SELECT * FROM flows WHERE id = ?").get(flowId) as FlowRow | undefined;
+  const flow = await db.prepare("SELECT * FROM flows WHERE id = ?").get(flowId) as FlowRow | undefined;
   if (!flow) throw new Error(`Flow ${flowId} no longer exists`);
 
   const triggerBy = (payload.triggerBy as "manual" | "schedule") ?? "schedule";
@@ -73,7 +73,7 @@ registerHandler("rollup", async (payload) => {
   const db = getDb();
   const workspaceIds = payload.workspaceId
     ? [String(payload.workspaceId)]
-    : (db.prepare("SELECT DISTINCT workspace_id FROM usage_events").all() as { workspace_id: string }[]).map((r) => r.workspace_id);
+    : (await db.prepare("SELECT DISTINCT workspace_id FROM usage_events").all() as { workspace_id: string }[]).map((r) => r.workspace_id);
 
   const results = workspaceIds.map((id) => rollupUsageEvents({ workspaceId: id }));
   return {
@@ -94,7 +94,7 @@ registerHandler("warehouse_audit", async (payload) => {
   if (!userId) return { skipped: true, reason: "no userId in payload" };
 
   const db = getDb();
-  const row = db.prepare("SELECT data FROM credentials WHERE user_id = ? AND service = 'bigquery'").get(userId) as
+  const row = await db.prepare("SELECT data FROM credentials WHERE user_id = ? AND service = 'bigquery'").get(userId) as
     | { data: string } | undefined;
   if (!row) return { skipped: true, reason: "BigQuery not configured for this user" };
 
@@ -110,7 +110,7 @@ registerHandler("warehouse_audit", async (payload) => {
   });
 
   const staleCount = snapshot.clusterHealth.filter((t) => t.status === "stale").length;
-  writeAudit({
+  await writeAudit({
     workspaceId: String(payload.workspaceId ?? "default"),
     userId,
     action: "warehouse.audit",
@@ -139,7 +139,7 @@ async function pollLoop(workerId: string) {
   while (g.__ctWorkers?.running) {
     let job: JobRow | null = null;
     try {
-      job = claimNextJob(workerId, Object.keys(HANDLERS) as JobType[]);
+      job = await claimNextJob(workerId, Object.keys(HANDLERS) as JobType[]);
     } catch (e) {
       console.warn(`[worker:${workerId}] claim failed:`, e instanceof Error ? e.message : e);
     }
@@ -151,19 +151,20 @@ async function pollLoop(workerId: string) {
 
     const handler = HANDLERS[job.type];
     if (!handler) {
-      failJob(job.id, `No handler registered for job type "${job.type}"`, workerId);
+      await failJob(job.id, `No handler registered for job type "${job.type}"`, workerId);
       continue;
     }
 
     try {
-      let payload: Record<string, unknown> = {};
-      try { payload = JSON.parse(job.payload); } catch { /* malformed payload — handler gets {} */ }
+      // job.payload is a JSONB column — the pg driver already returns it
+      // parsed, unlike the old SQLite TEXT column that needed JSON.parse().
+      const payload: Record<string, unknown> = job.payload ?? {};
       const result = await handler(payload, job);
-      completeJob(job.id, workerId, result ?? undefined);
+      await completeJob(job.id, workerId, result ?? undefined);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      const outcome = failJob(job.id, msg, workerId);
-      writeAudit({
+      const outcome = await failJob(job.id, msg, workerId);
+      await writeAudit({
         workspaceId: job.workspace_id,
         action: "job.failed",
         resource: `${job.type}:${job.id}`,
@@ -193,10 +194,9 @@ export function startWorkers(concurrency = 3) {
 
   if (!g.__ctReaper) {
     g.__ctReaper = setInterval(() => {
-      try {
-        const n = reapStaleJobs();
-        if (n) console.log(`[worker] reaped ${n} stale job(s) back onto the queue`);
-      } catch { /* DB not ready yet */ }
+      reapStaleJobs()
+        .then((n) => { if (n) console.log(`[worker] reaped ${n} stale job(s) back onto the queue`); })
+        .catch(() => { /* DB not ready yet */ });
     }, REAP_INTERVAL_MS);
   }
 }

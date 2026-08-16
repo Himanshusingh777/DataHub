@@ -40,21 +40,21 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const db = getDb();
 
   // ── Load model (workspace-scoped) ─────────────────────────────────────────
-  const model = db.prepare(
+  const model = await db.prepare(
     "SELECT id, workspace_id, user_id, sql_query, source_dataset FROM models WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId) as ModelRow | undefined;
 
   if (!model) return NextResponse.json({ ok: false, error: "Model not found" }, { status: 404 });
 
   // ── Resolve BQ credentials (workspace → user → shared admin) ─────────────
-  const bqCreds = resolveBqCreds(userId, workspaceId);
+  const bqCreds = await resolveBqCreds(userId, workspaceId);
   if (!bqCreds) {
     return NextResponse.json(
       { ok: false, notConfigured: true, error: "BigQuery credentials not configured — add them in Settings." },
@@ -98,7 +98,7 @@ export async function POST(
       : [];
 
     // ── Record run ────────────────────────────────────────────────────────
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO model_runs
         (id, model_id, workspace_id, user_id, status, rows_returned, duration_ms, bytes_processed, ran_at)
       VALUES (?, ?, ?, ?, 'success', ?, ?, ?, ?)
@@ -106,7 +106,7 @@ export async function POST(
 
     // ── Update schema_json on the model ──────────────────────────────────
     if (schema.length > 0) {
-      db.prepare("UPDATE models SET schema_json = ?, updated_at = ? WHERE id = ?")
+      await db.prepare("UPDATE models SET schema_json = ?, updated_at = ? WHERE id = ?")
         .run(JSON.stringify(schema), Date.now(), id);
     }
 
@@ -125,7 +125,7 @@ export async function POST(
     const durationMs = Date.now() - started;
 
     // Record failed run
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO model_runs
         (id, model_id, workspace_id, user_id, status, error, duration_ms, ran_at)
       VALUES (?, ?, ?, ?, 'failed', ?, ?, ?)

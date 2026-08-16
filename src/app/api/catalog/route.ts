@@ -14,7 +14,7 @@ import { getDb } from "@/lib/server/db";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   const db = getDb();
 
   // Pull catalog_tables for this workspace
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT
       ct.id, ct.connector_id, ct.schema_name, ct.table_name, ct.description,
       ct.row_count, ct.column_count, ct.owner_email, ct.last_synced_at,
@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
   }> = [];
   if (tableIds.length > 0) {
     const placeholders = tableIds.map(() => "?").join(",");
-    columns = db.prepare(`
+    columns = await db.prepare(`
       SELECT table_id, column_name, data_type, is_nullable, description
       FROM catalog_columns
       WHERE table_id IN (${placeholders})

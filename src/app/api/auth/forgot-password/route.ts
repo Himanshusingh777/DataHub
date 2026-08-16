@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   const db = getDb();
 
   // Only generate a token if the email exists — but always return 200
-  const user = db.prepare("SELECT id FROM users WHERE email = ?").get(email) as
+  const user = await db.prepare("SELECT id FROM users WHERE email = ?").get(email) as
     | { id: string } | undefined;
 
   if (user) {
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     const expiresAt = Date.now() + RESET_TTL_MS;
 
     // Upsert a reset token (one active token per user at a time)
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO password_resets (token, user_id, expires_at)
       VALUES (?, ?, ?)
       ON CONFLICT(user_id) DO UPDATE SET token = excluded.token, expires_at = excluded.expires_at

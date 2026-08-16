@@ -62,7 +62,7 @@ function sanitizeRows(rows: Record<string, unknown>[], schema: { name: string; t
 }
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
 
   let body: { table?: string; rows?: Record<string, unknown>[]; dataset?: string };
   try { body = await req.json(); } catch {
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Resolve BQ credentials from vault
-  const creds = resolveBqCreds(userId, workspaceId);
+  const creds = await resolveBqCreds(userId, workspaceId);
   if (!creds) {
     return NextResponse.json({
       ok: false,

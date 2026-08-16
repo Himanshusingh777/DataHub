@@ -29,10 +29,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "keyColumns required when syncMode is 'incremental'" }, { status: 400 });
 
   try {
-    const { userId, workspaceId } = getAuthContext(req);
+    const { userId, workspaceId } = await getAuthContext(req);
     const db = getDb();
 
-    const existing = db.prepare("SELECT user_id, workspace_id, sync_mode, key_columns FROM flows WHERE id = ?").get(body.id) as
+    const existing = await db.prepare("SELECT user_id, workspace_id, sync_mode, key_columns FROM flows WHERE id = ?").get(body.id) as
       | { user_id: string; workspace_id: string; sync_mode: string; key_columns: string | null } | undefined;
     if (existing && (existing.user_id !== userId || existing.workspace_id !== workspaceId))
       return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
       ? JSON.stringify(body.keyColumns)
       : existing?.key_columns ?? null;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO flows (id, user_id, workspace_id, name, source_id, source_name, dest_id, dest_name, schedule_value, warehouse_table, dataset, status, next_run_at, created_at, sync_mode, key_columns)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
@@ -67,14 +67,14 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    const { userId, workspaceId } = getAuthContext(req);
+    const { userId, workspaceId } = await getAuthContext(req);
     const db = getDb();
-    const flows = db.prepare("SELECT * FROM flows WHERE user_id = ? AND workspace_id = ? ORDER BY created_at DESC").all(userId, workspaceId);
+    const flows = await db.prepare("SELECT * FROM flows WHERE user_id = ? AND workspace_id = ? ORDER BY created_at DESC").all(userId, workspaceId);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const withRuns = (flows as any[]).map((f) => ({
+    const withRuns = await Promise.all((flows as any[]).map(async (f) => ({
       ...f,
-      runs: db.prepare("SELECT id, status, rows, duration_ms, error, trigger_by, started_at FROM runs WHERE flow_id = ? ORDER BY started_at DESC LIMIT 20").all(f.id),
-    }));
+      runs: await db.prepare("SELECT id, status, rows, duration_ms, error, trigger_by, started_at FROM runs WHERE flow_id = ? ORDER BY started_at DESC LIMIT 20").all(f.id),
+    })));
     return NextResponse.json({ ok: true, flows: withRuns });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e instanceof Error ? e.message : e) }, { status: 500 });
@@ -85,10 +85,10 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ ok: false, error: "id required" }, { status: 400 });
   try {
-    const { userId, workspaceId } = getAuthContext(req);
+    const { userId, workspaceId } = await getAuthContext(req);
     const db = getDb();
-    db.prepare("DELETE FROM flows WHERE id = ? AND user_id = ? AND workspace_id = ?").run(id, userId, workspaceId);
-    db.prepare("DELETE FROM runs WHERE flow_id = ?").run(id);
+    await db.prepare("DELETE FROM flows WHERE id = ? AND user_id = ? AND workspace_id = ?").run(id, userId, workspaceId);
+    await db.prepare("DELETE FROM runs WHERE flow_id = ?").run(id);
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e instanceof Error ? e.message : e) }, { status: 500 });

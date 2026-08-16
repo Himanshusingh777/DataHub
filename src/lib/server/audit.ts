@@ -5,6 +5,10 @@
  * job failure should call writeAudit(). Failures to write an audit entry are
  * swallowed (logged to console, never thrown) — an audit log must never be
  * the reason a real user-facing action fails.
+ *
+ * Callers MUST await this now (it wasn't a concern under synchronous SQLite,
+ * but on serverless a fire-and-forget unawaited write can be cut short when
+ * the function returns before the write actually lands).
  */
 
 import { getDb, DEFAULT_WORKSPACE_ID } from "./db";
@@ -19,9 +23,9 @@ export interface AuditEntry {
   ip?: string | null;
 }
 
-export function writeAudit(entry: AuditEntry): void {
+export async function writeAudit(entry: AuditEntry): Promise<void> {
   try {
-    getDb().prepare(`
+    await getDb().prepare(`
       INSERT INTO audit_log (id, workspace_id, user_id, action, resource, meta, ip, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -50,11 +54,11 @@ export interface AuditRow {
   created_at: number;
 }
 
-export function listAudit(args: {
+export async function listAudit(args: {
   workspaceId?: string;
   action?: string;
   limit?: number;
-} = {}): AuditRow[] {
+} = {}): Promise<AuditRow[]> {
   const db = getDb();
   const workspaceId = args.workspaceId ?? DEFAULT_WORKSPACE_ID;
   const limit = Math.min(args.limit ?? 100, 500);
@@ -62,11 +66,11 @@ export function listAudit(args: {
   if (args.action) {
     return db
       .prepare("SELECT * FROM audit_log WHERE workspace_id = ? AND action = ? ORDER BY created_at DESC LIMIT ?")
-      .all(workspaceId, args.action, limit) as AuditRow[];
+      .all(workspaceId, args.action, limit) as Promise<AuditRow[]>;
   }
   return db
     .prepare("SELECT * FROM audit_log WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?")
-    .all(workspaceId, limit) as AuditRow[];
+    .all(workspaceId, limit) as Promise<AuditRow[]>;
 }
 
 /** Extract a best-effort client IP from a Next.js request, for audit entries. */

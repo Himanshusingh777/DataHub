@@ -9,9 +9,9 @@ import { getAuthContext } from "@/lib/server/auth";
 import { resolveBqCreds } from "@/lib/server/bq-creds";
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   try {
-    const bqCreds = resolveBqCreds(userId, workspaceId);
+    const bqCreds = await resolveBqCreds(userId, workspaceId);
     if (!bqCreds) return NextResponse.json({ configured: false });
     return NextResponse.json({
       configured: true,

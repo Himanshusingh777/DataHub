@@ -43,19 +43,19 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const db = getDb();
 
-  const dashboard = db.prepare(
+  const dashboard = await db.prepare(
     "SELECT * FROM dashboards WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId) as DashboardRow | undefined;
 
   if (!dashboard) return NextResponse.json({ ok: false, error: "Dashboard not found" }, { status: 404 });
 
-  const widgets = db.prepare(
+  const widgets = await db.prepare(
     "SELECT * FROM widgets WHERE dashboard_id = ? AND workspace_id = ? ORDER BY created_at ASC"
   ).all(id, workspaceId) as WidgetRow[];
 
@@ -68,13 +68,13 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const db = getDb();
 
-  const existing = db.prepare(
+  const existing = await db.prepare(
     "SELECT id FROM dashboards WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId);
   if (!existing) return NextResponse.json({ ok: false, error: "Dashboard not found" }, { status: 404 });
@@ -87,7 +87,7 @@ export async function PUT(
   catch { return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 }); }
 
   const now = Date.now();
-  db.prepare(`
+  await db.prepare(`
     UPDATE dashboards SET
       name         = COALESCE(?, name),
       description  = CASE WHEN ? IS NOT NULL THEN ? ELSE description END,
@@ -107,8 +107,8 @@ export async function PUT(
     id, workspaceId
   );
 
-  const updated   = db.prepare("SELECT * FROM dashboards WHERE id = ?").get(id) as DashboardRow;
-  const widgets   = db.prepare(
+  const updated   = await db.prepare("SELECT * FROM dashboards WHERE id = ?").get(id) as DashboardRow;
+  const widgets   = await db.prepare(
     "SELECT * FROM widgets WHERE dashboard_id = ? AND workspace_id = ? ORDER BY created_at ASC"
   ).all(id, workspaceId) as WidgetRow[];
 
@@ -121,20 +121,20 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
   const db = getDb();
 
-  const existing = db.prepare(
+  const existing = await db.prepare(
     "SELECT id FROM dashboards WHERE id = ? AND workspace_id = ?"
   ).get(id, workspaceId);
   if (!existing) return NextResponse.json({ ok: false, error: "Dashboard not found" }, { status: 404 });
 
   // Cascade delete widgets first
-  db.prepare("DELETE FROM widgets WHERE dashboard_id = ? AND workspace_id = ?").run(id, workspaceId);
-  db.prepare("DELETE FROM dashboards WHERE id = ? AND workspace_id = ?").run(id, workspaceId);
+  await db.prepare("DELETE FROM widgets WHERE dashboard_id = ? AND workspace_id = ?").run(id, workspaceId);
+  await db.prepare("DELETE FROM dashboards WHERE id = ? AND workspace_id = ?").run(id, workspaceId);
 
   return NextResponse.json({ ok: true });
 }

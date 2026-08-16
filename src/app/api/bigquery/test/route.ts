@@ -30,8 +30,8 @@ export async function POST(req: NextRequest) {
 
   if (!projectId || !dataset || !body.serviceJson) {
     // Read from encrypted vault (Settings page path)
-    const userId = getUserId(req);
-    const row = getDb()
+    const userId = await getUserId(req);
+    const row = await getDb()
       .prepare("SELECT data FROM credentials WHERE user_id = ? AND service = 'bigquery'")
       .get(userId) as { data: string } | undefined;
 

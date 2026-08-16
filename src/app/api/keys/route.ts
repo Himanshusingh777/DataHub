@@ -7,11 +7,11 @@ import { hashApiKey } from "@/lib/server/crypto";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
-  const keys = db.prepare(
+  const keys = await db.prepare(
     `SELECT id, name, prefix, scopes, status, created_at, last_used_at
      FROM api_keys
      WHERE user_id = ? AND workspace_id = ? AND status = 'active'
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json() as { name?: string; scopes?: string[] };
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
   const keyHash = hashApiKey(rawKey);
 
   const db = getDb();
-  db.prepare(
+  await db.prepare(
     `INSERT INTO api_keys (id, user_id, workspace_id, name, prefix, key_hash, scopes, status, created_at)
      VALUES (?,?,?,?,?,?,?,?,?)`
   ).run(id, userId, workspaceId, name, prefix, keyHash, JSON.stringify(scopes), "active", now);

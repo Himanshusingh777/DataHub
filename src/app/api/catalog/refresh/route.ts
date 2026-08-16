@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     const connector = getConnector(id);
     if (!connector) continue;
     try {
-      const row = db.prepare(
+      const row = await db.prepare(
         "SELECT data FROM credentials WHERE user_id = ? AND workspace_id = ? AND service = ? LIMIT 1"
       ).get(userId, workspaceId, id) as { data: string } | undefined;
       if (!row) continue;
@@ -42,17 +42,17 @@ export async function POST(req: NextRequest) {
       for (const obj of objects) {
         const schema = await connector.discoverSchema(obj.id, creds).catch(() => []);
 
-        const existing = db.prepare(
+        const existing = await db.prepare(
           "SELECT id FROM catalog_tables WHERE user_id = ? AND workspace_id = ? AND connector_id = ? AND table_name = ?"
         ).get(userId, workspaceId, id, obj.table ?? obj.id) as { id: string } | undefined;
 
         let tableId: string;
         if (existing) {
           tableId = existing.id;
-          db.prepare(`
+          await db.prepare(`
             UPDATE catalog_tables SET
               schema_name = ?, description = ?, column_count = ?,
-              last_synced_at = datetime('now'), freshness_hours = 0
+              last_synced_at = now()::text, freshness_hours = 0
             WHERE id = ?
           `).run(id, obj.description ?? null, schema.length, tableId);
         } else {
@@ -65,11 +65,11 @@ export async function POST(req: NextRequest) {
           // BigQuery warehouse table), so the connector id stands in for
           // both, consistent with schema_name already reusing it below.
           tableId = genId("cat");
-          db.prepare(`
+          await db.prepare(`
             INSERT INTO catalog_tables
               (id, user_id, workspace_id, connector_id, schema_name, table_name, description, row_count, column_count,
                project_id, dataset, schema_json, discovered_at, last_synced_at, freshness_hours)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, '[]', ?, datetime('now'), 0)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, '[]', ?, now()::text, 0)
           `).run(
             tableId, userId, workspaceId, id, id, obj.table ?? obj.id, obj.description ?? null, schema.length,
             id, id, Date.now()
@@ -78,10 +78,10 @@ export async function POST(req: NextRequest) {
         tablesUpserted++;
 
         // Upsert columns
-        db.prepare("DELETE FROM catalog_columns WHERE table_id = ?").run(tableId);
+        await db.prepare("DELETE FROM catalog_columns WHERE table_id = ?").run(tableId);
         for (let i = 0; i < schema.length; i++) {
           const col = schema[i]!;
-          db.prepare(`
+          await db.prepare(`
             INSERT INTO catalog_columns (table_id, column_name, data_type, is_nullable, ordinal_position)
             VALUES (?, ?, ?, ?, ?)
           `).run(tableId, col.name, col.type, col.mode === "NULLABLE" ? 1 : 0, i + 1);

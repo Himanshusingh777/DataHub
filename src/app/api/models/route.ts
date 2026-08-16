@@ -41,7 +41,7 @@ function parseModel(row: ModelRow, warehouseTables: string[]) {
 // ── GET — list workspace models ───────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const url    = new URL(req.url);
@@ -57,8 +57,8 @@ export async function GET(req: NextRequest) {
   if (search) { sql += " AND name LIKE ?"; params.push(`%${search}%`); }
   sql += " ORDER BY updated_at DESC";
 
-  const rows = db.prepare(sql).all(...params) as ModelRow[];
-  const warehouseTables = (db.prepare("SELECT DISTINCT warehouse_table FROM flows WHERE workspace_id = ? AND warehouse_table IS NOT NULL").all(workspaceId) as { warehouse_table: string }[]).map((r) => r.warehouse_table);
+  const rows = await db.prepare(sql).all(...params) as ModelRow[];
+  const warehouseTables = (await db.prepare("SELECT DISTINCT warehouse_table FROM flows WHERE workspace_id = ? AND warehouse_table IS NOT NULL").all(workspaceId) as { warehouse_table: string }[]).map((r) => r.warehouse_table);
 
   return NextResponse.json({ ok: true, models: rows.map((r) => parseModel(r, warehouseTables)) });
 }
@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
 // ── POST — create model ───────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   let body: {
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
   const now = Date.now();
 
   const db = getDb();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO models
       (id, workspace_id, user_id, name, description, sql_query,
        source_table, source_dataset, tags, status, created_at, updated_at)
@@ -126,6 +126,6 @@ export async function POST(req: NextRequest) {
     now, now
   );
 
-  const created = db.prepare("SELECT * FROM models WHERE id = ?").get(id) as ModelRow;
+  const created = await db.prepare("SELECT * FROM models WHERE id = ?").get(id) as ModelRow;
   return NextResponse.json({ ok: true, model: parseModel(created, []) }, { status: 201 });
 }

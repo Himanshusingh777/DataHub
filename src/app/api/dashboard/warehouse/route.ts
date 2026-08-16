@@ -31,9 +31,9 @@ function safeIdent(s: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   // Workspace-scoped BQ credentials
-  const bqCreds = resolveBqCreds(userId, workspaceId);
+  const bqCreds = await resolveBqCreds(userId, workspaceId);
   if (!bqCreds) {
     return NextResponse.json({ ok: false, notConfigured: true, error: "BigQuery credentials not configured — add them in Settings." }, { status: 404 });
   }
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
         // Return only tables that belong to this user's workspace flows — BigQuery is
         // a shared warehouse and INFORMATION_SCHEMA shows all tables in the dataset.
         const userFlowTables = (
-          getDb()
+          await getDb()
             .prepare("SELECT warehouse_table FROM flows WHERE user_id = ? AND workspace_id = ? AND warehouse_table IS NOT NULL")
             .all(userId, workspaceId) as { warehouse_table: string }[]
         ).map((r) => r.warehouse_table);

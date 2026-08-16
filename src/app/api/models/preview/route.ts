@@ -32,7 +32,7 @@ function flattenBqRow(r: Record<string, unknown>): Record<string, unknown> {
 }
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   let body: { sql_query?: string; source_dataset?: string };
@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Write / DDL statements are not allowed." }, { status: 400 });
 
   // ── Resolve BQ credentials ─────────────────────────────────────────────────
-  const bqCreds = resolveBqCreds(userId, workspaceId);
+  const bqCreds = await resolveBqCreds(userId, workspaceId);
   if (!bqCreds) {
     return NextResponse.json(
       { ok: false, notConfigured: true, error: "BigQuery credentials not configured." },

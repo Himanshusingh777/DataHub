@@ -1,14 +1,15 @@
 /**
- * Rate limiting — in-process token bucket, keyed by identity + route.
+ * Rate limiting — Postgres-backed token bucket, keyed by identity + route.
  *
- * In-memory is the correct default for a single-process deployment (this
- * app's current shape — SQLite on local disk, no shared cache). The swap
- * point for a multi-instance deployment is `Bucket` storage: replace the Map
- * below with Redis (INCR + EXPIRE, or a Lua token-bucket script) without
- * changing any call site — every route calls the same `checkRateLimit()`.
+ * Was an in-process Map, which was correct for a single long-lived process
+ * but silently stopped rate-limiting anything once the app runs as multiple
+ * independent serverless invocations (each with its own empty Map) — a
+ * horizontally-scaled deployment effectively had no rate limiting at all.
+ * The `rate_limits` table (db/schema.sql) makes the bucket shared state
+ * every invocation sees, at the cost of one DB round trip per check.
  */
 
-const buckets = new Map<string, { tokens: number; updatedAt: number }>();
+import { getDb } from "./db";
 
 export interface RateLimitConfig {
   /** Max requests allowed per window. */
@@ -36,35 +37,49 @@ export interface RateLimitResult {
 /**
  * Token-bucket check. Refills continuously (limit tokens per windowMs), so
  * bursts are smoothed rather than resetting hard at a window boundary.
+ *
+ * Single atomic UPSERT: refills based on elapsed time since the bucket's
+ * last update, then consumes 1 token — all in one round trip so concurrent
+ * requests for the same key can't race past each other. If the refilled
+ * balance is under 1, the WHERE clause blocks the update and no row comes
+ * back — that's the "not allowed" signal, no separate read needed.
  */
-export function checkRateLimit(key: string, config: RateLimitConfig = RATE_LIMITS.default): RateLimitResult {
+export async function checkRateLimit(key: string, config: RateLimitConfig = RATE_LIMITS.default): Promise<RateLimitResult> {
   const now = Date.now();
-  const bucket = buckets.get(key) ?? { tokens: config.limit, updatedAt: now };
+  const db = getDb();
 
-  const elapsed = now - bucket.updatedAt;
-  const refill = (elapsed / config.windowMs) * config.limit;
-  const tokens = Math.min(config.limit, bucket.tokens + refill);
+  const row = await db.prepare(`
+    INSERT INTO rate_limits (key, tokens, updated_at) VALUES (?, ? - 1, ?)
+    ON CONFLICT (key) DO UPDATE SET
+      tokens = LEAST(?, rate_limits.tokens + ((? - rate_limits.updated_at)::float / ?) * ?) - 1,
+      updated_at = ?
+    WHERE LEAST(?, rate_limits.tokens + ((? - rate_limits.updated_at)::float / ?) * ?) >= 1
+    RETURNING tokens
+  `).get(
+    key, config.limit, now,
+    config.limit, now, config.windowMs, config.limit,
+    now,
+    config.limit, now, config.windowMs, config.limit,
+  ) as { tokens: number } | undefined;
 
-  const allowed = tokens >= 1;
-  const nextTokens = allowed ? tokens - 1 : tokens;
-
-  buckets.set(key, { tokens: nextTokens, updatedAt: now });
-
-  // Prevent unbounded growth of the map across many distinct keys/IPs.
-  if (buckets.size > 50_000) pruneBuckets();
+  if (!row) {
+    // Blocked — read the current (unconsumed) balance for a useful `remaining`/`resetAt`.
+    const current = await db.prepare("SELECT tokens, updated_at FROM rate_limits WHERE key = ?").get(key) as
+      | { tokens: number; updated_at: number } | undefined;
+    const elapsed = current ? now - current.updated_at : 0;
+    const tokens = current ? Math.min(config.limit, current.tokens + (elapsed / config.windowMs) * config.limit) : 0;
+    return {
+      allowed: false,
+      remaining: Math.floor(tokens),
+      resetAt: now + Math.ceil((config.limit - tokens) / config.limit) * config.windowMs,
+    };
+  }
 
   return {
-    allowed,
-    remaining: Math.floor(nextTokens),
-    resetAt: now + Math.ceil((config.limit - nextTokens) / config.limit) * config.windowMs,
+    allowed: true,
+    remaining: Math.floor(row.tokens),
+    resetAt: now + Math.ceil((config.limit - row.tokens) / config.limit) * config.windowMs,
   };
-}
-
-function pruneBuckets(): void {
-  const cutoff = Date.now() - 10 * 60_000;
-  for (const [key, bucket] of buckets) {
-    if (bucket.updatedAt < cutoff) buckets.delete(key);
-  }
 }
 
 /** Build a bucket key from an identity (user id or IP) and a route name. */
@@ -81,7 +96,7 @@ export function requestIdentity(req: { headers: { get(name: string): string | nu
 
 /**
  * Standard 429 JSON body + headers for a rejected request. Callers do:
- *   const rl = checkRateLimit(...);
+ *   const rl = await checkRateLimit(...);
  *   if (!rl.allowed) return NextResponse.json(...rateLimitResponse(rl));
  */
 export function rateLimitResponse(result: RateLimitResult) {

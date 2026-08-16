@@ -16,7 +16,7 @@ export async function GET() {
   try {
     const { getDb } = await import("@/lib/server/db");
     const db = getDb();
-    db.prepare("SELECT 1").get();
+    await db.prepare("SELECT 1").get();
     checks.database = { ok: true, latencyMs: Date.now() - dbStart };
   } catch (e) {
     checks.database = { ok: false, message: String(e), latencyMs: Date.now() - dbStart };

@@ -24,11 +24,11 @@ export const maxDuration = 30;
 const MAX_PROMPT_LENGTH = 2000;
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const identity = requestIdentity(req, userId);
-  const rl = checkRateLimit(rateLimitKey(identity, "ai-sql-generate"), RATE_LIMITS.aiSql);
+  const rl = await checkRateLimit(rateLimitKey(identity, "ai-sql-generate"), RATE_LIMITS.aiSql);
   if (!rl.allowed) {
     const r = rateLimitResponse(rl);
     return NextResponse.json(r.body, { status: r.status, headers: r.headers });
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
 
   const result = await generateSqlFromPrompt({ workspaceId, userId, prompt });
 
-  writeAudit({
+  await writeAudit({
     workspaceId,
     userId,
     action: result.ok ? "ai_sql.generated" : "ai_sql.failed",

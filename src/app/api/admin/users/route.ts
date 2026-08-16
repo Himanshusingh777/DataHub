@@ -16,8 +16,8 @@ import crypto from "crypto";
 const ADMIN_EMAILS = (process.env.ADMIN_EMAIL ?? "techtraining@frugaltestingid.com")
   .split(",").map((e) => e.trim().toLowerCase());
 
-function isAdmin(req: NextRequest) {
-  const u = getSessionUser(req);
+async function isAdmin(req: NextRequest) {
+  const u = await getSessionUser(req);
   if (!u || !ADMIN_EMAILS.includes(u.email.toLowerCase())) return null;
   return u;
 }
@@ -32,32 +32,32 @@ function genTempPassword(): string {
 
 // ── GET /api/admin/users ──────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
-  const admin = isAdmin(req);
+  const admin = await isAdmin(req);
   if (!admin) return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
 
   const db = getDb();
-  const users = db.prepare(
+  const users = await db.prepare(
     "SELECT id, email, name, role, status, created_at FROM users ORDER BY created_at DESC"
   ).all() as { id: string; email: string; name: string | null; role: string; status: string; created_at: number }[];
 
   // Enrich each user with workspace + flow/connector counts
-  const enriched = users.map((u) => {
-    const flowCount      = (db.prepare("SELECT COUNT(*) AS n FROM flows WHERE user_id=?").get(u.id) as { n: number }).n;
-    const connectorCount = (db.prepare("SELECT COUNT(*) AS n FROM credentials WHERE user_id=?").get(u.id) as { n: number }).n;
-    const runCount       = (db.prepare(
+  const enriched = await Promise.all(users.map(async (u) => {
+    const flowCount      = (await db.prepare("SELECT COUNT(*) AS n FROM flows WHERE user_id=?").get(u.id) as { n: number }).n;
+    const connectorCount = (await db.prepare("SELECT COUNT(*) AS n FROM credentials WHERE user_id=?").get(u.id) as { n: number }).n;
+    const runCount       = (await db.prepare(
       "SELECT COUNT(*) AS n FROM runs r JOIN flows f ON r.flow_id=f.id WHERE f.user_id=?"
     ).get(u.id) as { n: number }).n;
-    const lastSession    = db.prepare(
+    const lastSession    = await db.prepare(
       "SELECT expires_at FROM sessions WHERE user_id=? ORDER BY expires_at DESC LIMIT 1"
     ).get(u.id) as { expires_at: number } | undefined;
 
     // Workspace membership
-    const membership = db.prepare(
+    const membership = await db.prepare(
       "SELECT workspace_id, role FROM workspace_members WHERE user_id=? LIMIT 1"
     ).get(u.id) as { workspace_id: string; role: string } | undefined;
 
     const workspace = membership
-      ? db.prepare("SELECT id, name FROM workspaces WHERE id=?").get(membership.workspace_id) as
+      ? await db.prepare("SELECT id, name FROM workspaces WHERE id=?").get(membership.workspace_id) as
           { id: string; name: string } | undefined
       : undefined;
 
@@ -72,14 +72,14 @@ export async function GET(req: NextRequest) {
       workspace: workspace ?? null,
       workspaceRole: membership?.role ?? u.role,
     };
-  });
+  }));
 
   return NextResponse.json({ ok: true, users: enriched });
 }
 
 // ── POST /api/admin/users ─────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  const admin = isAdmin(req);
+  const admin = await isAdmin(req);
   if (!admin) return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
 
   let body: {
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
   const db = getDb();
 
   // Duplicate check
-  if (db.prepare("SELECT id FROM users WHERE email=?").get(email))
+  if (await db.prepare("SELECT id FROM users WHERE email=?").get(email))
     return NextResponse.json({ ok: false, error: "Email already registered" }, { status: 409 });
 
   // Generate temp password
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
   const passHash     = hashPassword(tempPassword);
   const userId       = genId("usr");
 
-  db.prepare(
+  await db.prepare(
     "INSERT INTO users (id, email, name, pass_hash, role, status, created_at) VALUES (?,?,?,?,?,?,?)"
   ).run(userId, email, body.name?.trim() ?? null, passHash, role, "active", Date.now());
 
@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
 
   if (body.workspaceId) {
     // Assign to existing workspace
-    const ws = db.prepare("SELECT id, name FROM workspaces WHERE id=?").get(body.workspaceId) as
+    const ws = await db.prepare("SELECT id, name FROM workspaces WHERE id=?").get(body.workspaceId) as
       { id: string; name: string } | undefined;
     if (ws) {
       workspaceId   = ws.id;
@@ -132,18 +132,21 @@ export async function POST(req: NextRequest) {
     workspaceId   = genId("ws");
     workspaceName = body.workspaceName.trim();
     const slug    = workspaceName.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-    db.prepare(
+    await db.prepare(
       "INSERT INTO workspaces (id, owner_id, name, slug, plan, created_at) VALUES (?,?,?,?,?,?)"
     ).run(workspaceId, userId, workspaceName, slug, "free", Date.now());
   }
 
   if (workspaceId) {
-    db.prepare(
-      "INSERT OR IGNORE INTO workspace_members (id, workspace_id, user_id, role, invited_by, joined_at) VALUES (?,?,?,?,?,?)"
+    // workspace_members has UNIQUE(workspace_id, user_id) — same "don't
+    // duplicate an existing membership" behavior as SQLite's INSERT OR IGNORE.
+    await db.prepare(
+      `INSERT INTO workspace_members (id, workspace_id, user_id, role, invited_by, joined_at) VALUES (?,?,?,?,?,?)
+       ON CONFLICT (workspace_id, user_id) DO NOTHING`
     ).run(genId("wm"), workspaceId, userId, role, admin.id, Date.now());
   }
 
-  writeAudit({
+  await writeAudit({
     userId: admin.id,
     action: "admin.create_user",
     resource: userId,

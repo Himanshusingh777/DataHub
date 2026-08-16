@@ -34,14 +34,14 @@ import { recordUsage } from "@/lib/server/billing";
 export async function GET(req: NextRequest) {
   const flowId = req.nextUrl.searchParams.get("flowId");
   if (!flowId) return NextResponse.json({ ok: false, error: "flowId is required" }, { status: 400 });
-  const checkpoint = getCheckpoint(flowId);
+  const checkpoint = await getCheckpoint(flowId);
   return NextResponse.json({ ok: true, checkpoint });
 }
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
 
-  const rl = checkRateLimit(rateLimitKey(requestIdentity(req, userId), "sync"), RATE_LIMITS.sync);
+  const rl = await checkRateLimit(rateLimitKey(requestIdentity(req, userId), "sync"), RATE_LIMITS.sync);
   if (!rl.allowed) {
     const r = rateLimitResponse(rl);
     return NextResponse.json(r.body, { status: r.status, headers: r.headers });
@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
 
     // Prefer an explicit startDate override; otherwise fall back to the
     // flow's stored watermark, if one exists.
-    const checkpoint = body.flowId ? getCheckpoint(body.flowId) : null;
+    const checkpoint = body.flowId ? await getCheckpoint(body.flowId) : null;
     const effectiveStartDate = body.startDate ?? checkpoint?.cursorValue ?? undefined;
     if (checkpoint?.cursorValue && !body.startDate) {
       log("info", `Using stored checkpoint: ${checkpoint.cursorField} >= ${checkpoint.cursorValue}`);
@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
     if (body.flowId) {
       nextCheckpoint = computeWatermark(result.rows);
       if (nextCheckpoint) {
-        setCheckpoint({
+        await setCheckpoint({
           flowId: body.flowId, cursorField: nextCheckpoint.field, cursorValue: nextCheckpoint.value,
           rowsThisRun: loadResult.rowsStaged,
         });
@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
     }
 
     log("success", "Incremental sync complete.");
-    writeAudit({
+    await writeAudit({
       workspaceId, userId, action: "sync.incremental_run", resource: `${sourceId}:${table}`,
       meta: { rowsStaged: loadResult.rowsStaged, columnsAdded: loadResult.columnsAdded, keyColumns },
     });

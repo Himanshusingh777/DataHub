@@ -21,7 +21,7 @@ const ADMIN_EMAILS = (process.env.ADMIN_EMAIL ?? "techtraining@frugaltestingid.c
 
 export async function GET(req: NextRequest) {
   // ── Auth check: must be a logged-in admin ─────────────────────────────
-  const sessionUser = getSessionUser(req);
+  const sessionUser = await getSessionUser(req);
   if (!sessionUser) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
@@ -33,28 +33,28 @@ export async function GET(req: NextRequest) {
     const db = getDb();
 
     // ── Platform-wide summary ──────────────────────────────────────────
-    const totalUsers      = (db.prepare("SELECT COUNT(*) as n FROM users").get() as { n: number }).n;
-    const totalFlows      = (db.prepare("SELECT COUNT(*) as n FROM flows").get() as { n: number }).n;
-    const totalRuns       = (db.prepare("SELECT COUNT(*) as n FROM runs").get() as { n: number }).n;
-    const totalRowsObj    = db.prepare("SELECT SUM(rows) as n FROM runs WHERE status='success'").get() as { n: number | null };
+    const totalUsers      = (await db.prepare("SELECT COUNT(*) as n FROM users").get() as { n: number }).n;
+    const totalFlows      = (await db.prepare("SELECT COUNT(*) as n FROM flows").get() as { n: number }).n;
+    const totalRuns       = (await db.prepare("SELECT COUNT(*) as n FROM runs").get() as { n: number }).n;
+    const totalRowsObj    = await db.prepare("SELECT SUM(rows) as n FROM runs WHERE status='success'").get() as { n: number | null };
     const totalRows       = totalRowsObj.n ?? 0;
-    const activeFlows     = (db.prepare("SELECT COUNT(*) as n FROM flows WHERE status='active'").get() as { n: number }).n;
+    const activeFlows     = (await db.prepare("SELECT COUNT(*) as n FROM flows WHERE status='active'").get() as { n: number }).n;
     // Intelligence Platform counters
-    const totalModels     = (db.prepare("SELECT COUNT(*) as n FROM models").get() as { n: number }).n;
-    const publishedModels = (db.prepare("SELECT COUNT(*) as n FROM models WHERE status='published'").get() as { n: number }).n;
-    const totalDashboards = (db.prepare("SELECT COUNT(*) as n FROM dashboards").get() as { n: number }).n;
-    const totalWidgets    = (db.prepare("SELECT COUNT(*) as n FROM widgets").get() as { n: number }).n;
-    const totalInsights   = (db.prepare("SELECT COUNT(*) as n FROM bi_insights WHERE dismissed=0").get() as { n: number }).n;
+    const totalModels     = (await db.prepare("SELECT COUNT(*) as n FROM models").get() as { n: number }).n;
+    const publishedModels = (await db.prepare("SELECT COUNT(*) as n FROM models WHERE status='published'").get() as { n: number }).n;
+    const totalDashboards = (await db.prepare("SELECT COUNT(*) as n FROM dashboards").get() as { n: number }).n;
+    const totalWidgets    = (await db.prepare("SELECT COUNT(*) as n FROM widgets").get() as { n: number }).n;
+    const totalInsights   = (await db.prepare("SELECT COUNT(*) as n FROM bi_insights WHERE dismissed=0").get() as { n: number }).n;
 
     // ── All users ────────────────────────────────────────────────────────
-    const users = db.prepare(
+    const users = await db.prepare(
       "SELECT id, email, name, created_at FROM users ORDER BY created_at DESC"
     ).all() as { id: string; email: string; name: string | null; created_at: number }[];
 
     // ── Per-user enrichment ───────────────────────────────────────────────
-    const enriched = users.map((user) => {
+    const enriched = await Promise.all(users.map(async (user) => {
       // Flows
-      const flows = db.prepare(
+      const flows = await db.prepare(
         "SELECT id, source_id, source_name, dest_id, dest_name, schedule_value, status, next_run_at, created_at FROM flows WHERE user_id = ? ORDER BY created_at DESC"
       ).all(user.id) as {
         id: string; source_id: string; source_name: string | null;
@@ -63,12 +63,12 @@ export async function GET(req: NextRequest) {
       }[];
 
       // Connectors (credentials stored — masked, no secrets)
-      const connectors = db.prepare(
+      const connectors = await db.prepare(
         "SELECT service, updated_at FROM credentials WHERE user_id = ? ORDER BY updated_at DESC"
       ).all(user.id) as { service: string; updated_at: number }[];
 
       // Run stats aggregated
-      const runStats = db.prepare(`
+      const runStats = await db.prepare(`
         SELECT
           COUNT(*)                                          AS total_runs,
           SUM(CASE WHEN r.status='success' THEN 1 ELSE 0 END) AS success_runs,
@@ -84,26 +84,26 @@ export async function GET(req: NextRequest) {
       };
 
       // Last active (most recent session)
-      const lastSession = db.prepare(
+      const lastSession = await db.prepare(
         "SELECT expires_at FROM sessions WHERE user_id = ? ORDER BY expires_at DESC LIMIT 1"
       ).get(user.id) as { expires_at: number } | undefined;
 
       // API keys count
-      const apiKeyCount = (db.prepare(
+      const apiKeyCount = (await db.prepare(
         "SELECT COUNT(*) as n FROM api_keys WHERE user_id = ? AND status='active'"
       ).get(user.id) as { n: number }).n;
 
       // Intelligence platform counts (per-user workspace)
-      const workspace = db.prepare(
+      const workspace = await db.prepare(
         "SELECT id FROM workspaces WHERE owner_id = ? LIMIT 1"
       ).get(user.id) as { id: string } | undefined;
       const wsId = workspace?.id ?? "default";
-      const modelCount     = (db.prepare("SELECT COUNT(*) as n FROM models WHERE workspace_id = ?").get(wsId) as { n: number }).n;
-      const dashboardCount = (db.prepare("SELECT COUNT(*) as n FROM dashboards WHERE workspace_id = ?").get(wsId) as { n: number }).n;
-      const widgetCount    = (db.prepare("SELECT COUNT(*) as n FROM widgets WHERE workspace_id = ?").get(wsId) as { n: number }).n;
+      const modelCount     = (await db.prepare("SELECT COUNT(*) as n FROM models WHERE workspace_id = ?").get(wsId) as { n: number }).n;
+      const dashboardCount = (await db.prepare("SELECT COUNT(*) as n FROM dashboards WHERE workspace_id = ?").get(wsId) as { n: number }).n;
+      const widgetCount    = (await db.prepare("SELECT COUNT(*) as n FROM widgets WHERE workspace_id = ?").get(wsId) as { n: number }).n;
 
       // Recent runs (last 5 across all flows)
-      const recentRuns = db.prepare(`
+      const recentRuns = await db.prepare(`
         SELECT r.id, r.status, r.rows, r.duration_ms, r.error, r.started_at,
                f.source_name, f.dest_name
         FROM runs r
@@ -118,7 +118,7 @@ export async function GET(req: NextRequest) {
       }[];
 
       // Audit log (last 10 actions)
-      const auditLog = db.prepare(
+      const auditLog = await db.prepare(
         "SELECT action, resource, ip, created_at FROM audit_log WHERE user_id = ? ORDER BY created_at DESC LIMIT 10"
       ).all(user.id) as { action: string; resource: string | null; ip: string | null; created_at: number }[];
 
@@ -154,7 +154,7 @@ export async function GET(req: NextRequest) {
         recentRuns:  recentRuns,
         auditLog:    auditLog,
       };
-    });
+    }));
 
     // ── Onboarding funnel ─────────────────────────────────────────────────
     // Count users at each stage

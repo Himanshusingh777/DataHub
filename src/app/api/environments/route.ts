@@ -6,14 +6,14 @@ import { randomUUID } from "crypto";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
-  const envs = db.prepare(`
+  const envs = await db.prepare(`
     SELECT e.id, e.name, e.slug, e.color,
-           COUNT(s.id) AS secretCount,
-           datetime(e.created_at / 1000, 'unixepoch') AS createdAt
+           COUNT(s.id) AS "secretCount",
+           to_timestamp(e.created_at / 1000.0) AS "createdAt"
     FROM environments e
     LEFT JOIN secrets s ON s.env_id = e.id AND s.workspace_id = ?
     WHERE e.workspace_id = ?
@@ -29,14 +29,17 @@ export async function GET(req: NextRequest) {
       { name: "Production",  slug: "prod",    color: "#EF4444" },
     ];
     for (const d of defaults) {
-      db.prepare(`
-        INSERT OR IGNORE INTO environments (id, workspace_id, name, slug, color, created_at)
+      // environments has UNIQUE(workspace_id, slug) — matches SQLite's
+      // INSERT OR IGNORE (skip if this workspace already has this slug).
+      await db.prepare(`
+        INSERT INTO environments (id, workspace_id, name, slug, color, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (workspace_id, slug) DO NOTHING
       `).run(randomUUID(), workspaceId, d.name, d.slug, d.color, Date.now());
     }
-    const refetched = db.prepare(`
-      SELECT e.id, e.name, e.slug, e.color, 0 AS secretCount,
-             datetime(e.created_at / 1000, 'unixepoch') AS createdAt
+    const refetched = await db.prepare(`
+      SELECT e.id, e.name, e.slug, e.color, 0 AS "secretCount",
+             to_timestamp(e.created_at / 1000.0) AS "createdAt"
       FROM environments e
       WHERE e.workspace_id = ?
       ORDER BY e.created_at ASC
@@ -48,7 +51,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json() as { name?: string; color?: string };
@@ -57,11 +60,11 @@ export async function POST(req: NextRequest) {
   const db = getDb();
   const id = randomUUID();
   const slug = body.name.toLowerCase().replace(/[^a-z0-9]/g, "_");
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO environments (id, workspace_id, name, slug, color, created_at)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(id, workspaceId, body.name.trim(), slug, body.color ?? "#6366F1", Date.now());
 
-  const env = db.prepare("SELECT * FROM environments WHERE id = ?").get(id);
+  const env = await db.prepare("SELECT * FROM environments WHERE id = ?").get(id);
   return NextResponse.json({ environment: env });
 }

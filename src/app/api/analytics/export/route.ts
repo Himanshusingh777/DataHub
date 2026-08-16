@@ -10,12 +10,12 @@ import { getDb } from "@/lib/server/db";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   const days = parseInt(req.nextUrl.searchParams.get("days") ?? "30", 10) || 30;
   const since = Date.now() - days * 86_400_000;
 
   const db = getDb();
-  const runs = db.prepare(`
+  const runs = await db.prepare(`
     SELECT
       r.id,
       f.source_id AS source,
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
       r.rows,
       r.duration_ms,
       r.trigger_by,
-      datetime(r.started_at / 1000, 'unixepoch') AS started_at,
+      to_timestamp(r.started_at / 1000.0) AS started_at,
       r.error
     FROM runs r
     JOIN flows f ON f.id = r.flow_id

@@ -14,12 +14,12 @@ import { listJobs, queueStats, requeueJob, type JobStatus } from "@/lib/server/j
 
 export async function GET(req: NextRequest) {
   try {
-    const { userId, workspaceId } = getAuthContext(req);
+    const { userId, workspaceId } = await getAuthContext(req);
     const status = req.nextUrl.searchParams.get("status") as JobStatus | null;
     const limit = Number(req.nextUrl.searchParams.get("limit") ?? 50);
 
-    const jobs = listJobs({ workspaceId, status: status ?? undefined, limit });
-    const stats = queueStats(workspaceId);
+    const jobs = await listJobs({ workspaceId, status: status ?? undefined, limit });
+    const stats = await queueStats(workspaceId);
 
     return NextResponse.json({
       ok: true,
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
         maxAttempts: j.max_attempts,
         lastError: j.last_error,
         payload: safeParse(j.payload),
-        result: j.result ? safeParse(j.result) : null,
+        result: j.result != null ? safeParse(j.result) : null,
         createdAt: j.created_at,
         updatedAt: j.updated_at,
         runAfter: j.run_after,
@@ -53,13 +53,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'Only { action: "retry", id } is supported' }, { status: 400 });
   }
   try {
-    const ok = requeueJob(body.id);
+    const ok = await requeueJob(body.id);
     return NextResponse.json({ ok, error: ok ? undefined : "Job not found or not in a dead-lettered state" });
   } catch (e) {
     return NextResponse.json({ ok: false, error: String(e instanceof Error ? e.message : e) }, { status: 500 });
   }
 }
 
-function safeParse(json: string): unknown {
-  try { return JSON.parse(json); } catch { return json; }
+// jobs.payload / jobs.result are jsonb columns — the pg driver already
+// returns them parsed. Keep a string fallback here defensively in case a
+// raw JSON string ever comes through instead.
+function safeParse(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); } catch { return value; }
 }

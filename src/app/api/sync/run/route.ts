@@ -30,11 +30,11 @@ import { checkRateLimit, rateLimitKey, rateLimitResponse, requestIdentity, RATE_
 import { recordUsage } from "@/lib/server/billing";
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
 
   // Manual sync triggers hit an external API and a BigQuery load job —
   // both cost money and can be abused to exhaust a connector's rate limit.
-  const rl = checkRateLimit(rateLimitKey(requestIdentity(req, userId), "sync"), RATE_LIMITS.sync);
+  const rl = await checkRateLimit(rateLimitKey(requestIdentity(req, userId), "sync"), RATE_LIMITS.sync);
   if (!rl.allowed) {
     const r = rateLimitResponse(rl);
     return NextResponse.json(r.body, { status: r.status, headers: r.headers });
@@ -66,12 +66,12 @@ export async function POST(req: NextRequest) {
   //    to runFlowSync() so run records + flow status are always written to DB.
   //    This is the path for manual "Sync now" on real flows.
   if (flowId) {
-    const flow = db.prepare("SELECT * FROM flows WHERE id = ? AND user_id = ?").get(flowId, userId) as Record<string, unknown> | undefined;
+    const flow = await db.prepare("SELECT * FROM flows WHERE id = ? AND user_id = ?").get(flowId, userId) as Record<string, unknown> | undefined;
     if (flow) {
       const { runFlowSync } = await import("@/lib/server/runner");
       const result = await runFlowSync(flow as any, "manual");
       // Read the freshly written run record back for the response
-      const latestRun = db.prepare("SELECT * FROM runs WHERE flow_id = ? ORDER BY started_at DESC LIMIT 1").get(flowId) as Record<string, unknown> | undefined;
+      const latestRun = await db.prepare("SELECT * FROM runs WHERE flow_id = ? ORDER BY started_at DESC LIMIT 1").get(flowId) as Record<string, unknown> | undefined;
       return NextResponse.json({
         ok: result.ok,
         rowsInserted: result.rows,
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
   let dataset: string;
   let credentials: Record<string, string>;
 
-  const vaultBqRow = db.prepare("SELECT data FROM credentials WHERE user_id = ? AND service = 'bigquery'")
+  const vaultBqRow = await db.prepare("SELECT data FROM credentials WHERE user_id = ? AND service = 'bigquery'")
     .get(userId) as { data: string } | undefined;
 
   if (vaultBqRow) {
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
   // For pull connectors (Instantly), read source creds from vault
   let sourceCreds: Record<string, string> = body.sourceCreds ?? {};
   if (!Array.isArray(body.rows) && sourceId !== "csv") {
-    const vaultSrcRow = db.prepare("SELECT data FROM credentials WHERE user_id = ? AND service = ?")
+    const vaultSrcRow = await db.prepare("SELECT data FROM credentials WHERE user_id = ? AND service = ?")
       .get(userId, sourceId) as { data: string } | undefined;
     if (vaultSrcRow) {
       try { sourceCreds = JSON.parse(decrypt(vaultSrcRow.data)); } catch { /* fall through to body creds */ }
@@ -172,7 +172,7 @@ export async function POST(req: NextRequest) {
     const loadResult = await loadToBigQuery({ projectId, credentials, dataset, table, rows, schema, log });
 
     log("success", "Sync complete.");
-    writeAudit({
+    await writeAudit({
       workspaceId, userId, action: "sync.manual_run", resource: `${sourceId}:${table}`,
       meta: { rowsInserted: loadResult.rowsInserted },
     });
@@ -181,7 +181,7 @@ export async function POST(req: NextRequest) {
     // Write run record to DB (standalone path — no registered flowId)
     const runId = genId("run");
     try {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO runs (id, flow_id, workspace_id, status, rows, duration_ms, error, logs, trigger_by, started_at)
         VALUES (?, ?, ?, 'success', ?, ?, NULL, ?, 'manual', ?)
       `).run(runId, `standalone:${sourceId}:${table}`, workspaceId, loadResult.rowsInserted, Date.now() - started, JSON.stringify(logs), started);
@@ -207,7 +207,7 @@ export async function POST(req: NextRequest) {
 
     // Write failed run record (best-effort)
     try {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO runs (id, flow_id, workspace_id, status, rows, duration_ms, error, logs, trigger_by, started_at)
         VALUES (?, ?, ?, 'failed', 0, ?, ?, ?, 'manual', ?)
       `).run(genId("run"), `standalone:${sourceId ?? "unknown"}`, workspaceId, Date.now() - started, msg, JSON.stringify(logs), started);

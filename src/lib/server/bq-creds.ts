@@ -30,23 +30,23 @@ export interface BqCreds {
  * Resolve BigQuery credentials for a workspace + user pair.
  * Returns null if no BQ credentials are configured anywhere.
  */
-export function resolveBqCreds(
+export async function resolveBqCreds(
   userId: string,
   workspaceId?: string
-): BqCreds | null {
+): Promise<BqCreds | null> {
   const db = getDb();
 
   // 1. Workspace-level credential
   let row: { data: string } | undefined;
   if (workspaceId && workspaceId !== "default") {
-    row = db
+    row = await db
       .prepare("SELECT data FROM credentials WHERE workspace_id = ? AND service = 'bigquery' LIMIT 1")
       .get(workspaceId) as { data: string } | undefined;
   }
 
   // 2. User's own credential
   if (!row) {
-    row = db
+    row = await db
       .prepare("SELECT data FROM credentials WHERE user_id = ? AND service = 'bigquery'")
       .get(userId) as { data: string } | undefined;
   }
@@ -60,7 +60,7 @@ export function resolveBqCreds(
     // Prefer workspace dataset_id from the workspaces table if set
     let dataset = (creds.dataset ?? "").trim();
     if (workspaceId && workspaceId !== "default") {
-      const ws = db
+      const ws = await db
         .prepare("SELECT dataset_id FROM workspaces WHERE id = ?")
         .get(workspaceId) as { dataset_id: string | null } | undefined;
       if (ws?.dataset_id) dataset = ws.dataset_id;
@@ -84,12 +84,12 @@ export function resolveBqCreds(
  * Resolve BQ creds given a flow row (which may carry its own `dataset` override).
  * Flow dataset > workspace dataset > credential dataset.
  */
-export function resolveBqCredsForFlow(
+export async function resolveBqCredsForFlow(
   userId: string,
   workspaceId: string,
   flowDataset?: string | null
-): BqCreds | null {
-  const base = resolveBqCreds(userId, workspaceId);
+): Promise<BqCreds | null> {
+  const base = await resolveBqCreds(userId, workspaceId);
   if (!base) return null;
   if (flowDataset) return { ...base, dataset: flowDataset };
   return base;

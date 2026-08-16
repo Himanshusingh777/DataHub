@@ -5,19 +5,19 @@ import { getDb } from "@/lib/server/db";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const db = getDb();
   const since7d = Date.now() - 7 * 24 * 60 * 60 * 1000;
 
   // Real KPIs from runs table — scoped to this workspace
-  const stats = db.prepare(`
+  const stats = await db.prepare(`
     SELECT
-      SUM(r.rows) AS totalRows,
-      COUNT(*) AS totalRuns,
-      SUM(CASE WHEN r.status='success' THEN 1 ELSE 0 END) AS successRuns,
-      AVG(CASE WHEN r.status='success' THEN r.duration_ms END) AS avgMs
+      SUM(r.rows) AS "totalRows",
+      COUNT(*) AS "totalRuns",
+      SUM(CASE WHEN r.status='success' THEN 1 ELSE 0 END) AS "successRuns",
+      AVG(CASE WHEN r.status='success' THEN r.duration_ms END) AS "avgMs"
     FROM runs r
     JOIN flows f ON f.id = r.flow_id
     WHERE f.workspace_id = ? AND f.user_id = ? AND r.started_at >= ?

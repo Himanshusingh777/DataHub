@@ -21,8 +21,8 @@ export interface Checkpoint {
   rowsSince: number;
 }
 
-export function getCheckpoint(flowId: string): Checkpoint | null {
-  const row = getDb()
+export async function getCheckpoint(flowId: string): Promise<Checkpoint | null> {
+  const row = await getDb()
     .prepare("SELECT flow_id, cursor_field, cursor_value, watermark_at, rows_since FROM sync_state WHERE flow_id = ?")
     .get(flowId) as
     | { flow_id: string; cursor_field: string | null; cursor_value: string | null; watermark_at: number | null; rows_since: number }
@@ -37,15 +37,15 @@ export function getCheckpoint(flowId: string): Checkpoint | null {
   };
 }
 
-export function setCheckpoint(args: {
+export async function setCheckpoint(args: {
   flowId: string;
   cursorField: string;
   cursorValue: string;
   rowsThisRun: number;
-}): void {
+}): Promise<void> {
   const db = getDb();
   const now = Date.now();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO sync_state (flow_id, cursor_field, cursor_value, watermark_at, rows_since, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(flow_id) DO UPDATE SET
@@ -57,8 +57,8 @@ export function setCheckpoint(args: {
   `).run(args.flowId, args.cursorField, args.cursorValue, now, args.rowsThisRun, now);
 }
 
-export function clearCheckpoint(flowId: string): void {
-  getDb().prepare("DELETE FROM sync_state WHERE flow_id = ?").run(flowId);
+export async function clearCheckpoint(flowId: string): Promise<void> {
+  await getDb().prepare("DELETE FROM sync_state WHERE flow_id = ?").run(flowId);
 }
 
 /**

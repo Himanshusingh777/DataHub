@@ -281,17 +281,16 @@ export interface LoadDurationStats {
  * incremental) already records duration_ms in the local `runs` table via
  * runner.ts. This is real, first-party telemetry, not a warehouse query.
  */
-export function getLoadDurations(args: { userId: string; workspaceId?: string; limit?: number }): LoadDurationStats[] {
+export async function getLoadDurations(args: { userId: string; workspaceId?: string; limit?: number }): Promise<LoadDurationStats[]> {
   const { userId, workspaceId, limit = 200 } = args;
   const db = getDb();
-  const flows = workspaceId
-    ? db.prepare("SELECT id, source_id, warehouse_table FROM flows WHERE user_id = ? AND workspace_id = ?").all(userId, workspaceId) as
-      { id: string; source_id: string; warehouse_table: string | null }[]
-    : db.prepare("SELECT id, source_id, warehouse_table FROM flows WHERE user_id = ?").all(userId) as
+  const flows = (workspaceId
+    ? await db.prepare("SELECT id, source_id, warehouse_table FROM flows WHERE user_id = ? AND workspace_id = ?").all(userId, workspaceId)
+    : await db.prepare("SELECT id, source_id, warehouse_table FROM flows WHERE user_id = ?").all(userId)) as
     { id: string; source_id: string; warehouse_table: string | null }[];
 
-  return flows.map((f) => {
-    const runs = db.prepare(
+  const stats = await Promise.all(flows.map(async (f) => {
+    const runs = await db.prepare(
       "SELECT duration_ms, status, started_at FROM runs WHERE flow_id = ? AND duration_ms IS NOT NULL ORDER BY started_at DESC LIMIT ?"
     ).all(f.id, limit) as { duration_ms: number; status: string; started_at: number }[];
 
@@ -310,7 +309,8 @@ export function getLoadDurations(args: { userId: string; workspaceId?: string; l
       lastStatus: runs[0]?.status ?? null,
       lastRunAt: runs[0]?.started_at ?? null,
     };
-  }).filter((s) => s.runCount > 0);
+  }));
+  return stats.filter((s) => s.runCount > 0);
 }
 
 // ── Warehouse statistics (composite snapshot) ─────────────────────────────
@@ -383,7 +383,7 @@ export async function getWarehouseSnapshot(args: {
 
   // Always fresh — cheap local read, and should reflect a sync that just
   // finished rather than whatever was cached 30s ago.
-  const loadDurations = getLoadDurations({ userId, workspaceId });
+  const loadDurations = await getLoadDurations({ userId, workspaceId });
 
   // ── Per-user table isolation ──────────────────────────────────────────────
   // BigQuery is a shared warehouse — INFORMATION_SCHEMA returns ALL tables in
@@ -400,18 +400,18 @@ export async function getWarehouseSnapshot(args: {
   const userIds = userId === LOCAL_UID ? [LOCAL_UID] : [userId, LOCAL_UID];
   const placeholders = userIds.map(() => "?").join(",");
   let userFlowTables = (
-    db.prepare(`SELECT warehouse_table FROM flows WHERE user_id IN (${placeholders}) AND warehouse_table IS NOT NULL`).all(...userIds) as { warehouse_table: string }[]
+    await db.prepare(`SELECT warehouse_table FROM flows WHERE user_id IN (${placeholders}) AND warehouse_table IS NOT NULL`).all(...userIds) as { warehouse_table: string }[]
   ).map((r) => r.warehouse_table);
 
   // Self-healing recovery: parse run logs for "Loaded N rows → tablename" and
   // write warehouse_table back to flows so future lookups find it instantly.
   if (userFlowTables.length === 0) {
     try {
-      const nullFlows = db.prepare(
+      const nullFlows = await db.prepare(
         `SELECT id FROM flows WHERE user_id IN (${placeholders})`
       ).all(...userIds) as { id: string }[];
       for (const { id: fid } of nullFlows) {
-        const latestRun = db.prepare(
+        const latestRun = await db.prepare(
           "SELECT logs FROM runs WHERE flow_id = ? AND status = 'success' ORDER BY started_at DESC LIMIT 1"
         ).get(fid) as { logs: string } | undefined;
         if (!latestRun?.logs) continue;
@@ -420,7 +420,7 @@ export async function getWarehouseSnapshot(args: {
           for (const entry of logs) {
             const m = entry.message?.match(/Loaded \d+ rows → (\S+)/);
             if (m?.[1]) {
-              db.prepare("UPDATE flows SET warehouse_table = ? WHERE id = ?").run(m[1], fid);
+              await db.prepare("UPDATE flows SET warehouse_table = ? WHERE id = ?").run(m[1], fid);
               userFlowTables.push(m[1]);
               break;
             }

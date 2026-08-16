@@ -2,12 +2,11 @@
  * Background Job Engine — durable queue backing the scheduler and any future
  * async work (rollups, schema checks, exports).
  *
- * Design: SQLite as the queue table (already the app's datastore — no new
- * infrastructure to run), claimed with an immediate transaction so concurrent
- * workers in the same process (or across a PM2/cluster deployment sharing the
- * same DB file) never double-claim a row. Swap-in point for a hosted queue
- * (SQS, Cloud Tasks, BullMQ+Redis) later is exactly this file — every caller
- * only sees `enqueueJob` / `claimNextJob` / `completeJob` / `failJob`.
+ * Design: Postgres as the queue table. `claimNextJob` claims in a single
+ * atomic statement using `FOR UPDATE SKIP LOCKED` inside a CTE, so concurrent
+ * callers (multiple Vercel Cron invocations, or multiple workers in a
+ * long-lived process) never double-claim a row — no separate transaction
+ * wrapper needed, the CTE + UPDATE is one round trip.
  *
  * Retry policy: exponential backoff (30s * 2^attempts, capped at 30 min).
  * After `max_attempts` the job moves to `dead` (dead-letter) rather than
@@ -26,7 +25,8 @@ export interface JobRow {
   id: string;
   workspace_id: string;
   type: JobType;
-  payload: string;
+  /** JSONB column — the pg driver returns this already-parsed, not a JSON string. */
+  payload: Record<string, unknown>;
   status: JobStatus;
   priority: number;
   attempts: number;
@@ -35,7 +35,8 @@ export interface JobRow {
   locked_by: string | null;
   locked_at: number | null;
   last_error: string | null;
-  result: string | null;
+  /** JSONB column — already-parsed, not a JSON string. */
+  result: Record<string, unknown> | null;
   created_at: number;
   updated_at: number;
 }
@@ -47,8 +48,8 @@ export interface EnqueueOptions {
   maxAttempts?: number;
   /**
    * When set, an already-queued/running job with the same dedupeKey is
-   * returned instead of creating a duplicate. Used so the scheduler's 60s
-   * tick can't enqueue the same flow twice if a run is still in flight.
+   * returned instead of creating a duplicate. Used so the scheduler tick
+   * can't enqueue the same flow twice if a run is still in flight.
    */
   dedupeKey?: string;
 }
@@ -60,15 +61,15 @@ function backoffMs(attempts: number): number {
 }
 
 /** Add (or reuse) a job. Returns the job id. */
-export function enqueueJob(type: JobType, payload: Record<string, unknown>, opts: EnqueueOptions = {}): string {
+export async function enqueueJob(type: JobType, payload: Record<string, unknown>, opts: EnqueueOptions = {}): Promise<string> {
   const db = getDb();
   const workspaceId = opts.workspaceId ?? DEFAULT_WORKSPACE_ID;
 
   if (opts.dedupeKey) {
-    const existing = db
+    const existing = await db
       .prepare(
         `SELECT id FROM jobs WHERE workspace_id = ? AND type = ? AND status IN ('queued','running')
-         AND json_extract(payload, '$.dedupeKey') = ? LIMIT 1`
+         AND payload->>'dedupeKey' = ? LIMIT 1`
       )
       .get(workspaceId, type, opts.dedupeKey) as { id: string } | undefined;
     if (existing) return existing.id;
@@ -76,7 +77,7 @@ export function enqueueJob(type: JobType, payload: Record<string, unknown>, opts
 
   const id = genId("job");
   const now = Date.now();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO jobs (id, workspace_id, type, payload, status, priority, attempts, max_attempts, run_after, created_at, updated_at)
     VALUES (?, ?, ?, ?, 'queued', ?, 0, ?, ?, ?, ?)
   `).run(
@@ -89,38 +90,30 @@ export function enqueueJob(type: JobType, payload: Record<string, unknown>, opts
 
 /**
  * Atomically claim the next runnable job for this worker. Returns null when
- * the queue is empty. Uses an IMMEDIATE transaction so two workers racing to
- * claim the same row always resolve to exactly one winner.
+ * the queue is empty. `FOR UPDATE SKIP LOCKED` inside the CTE means a
+ * concurrently-running claim just skips a row someone else already has
+ * locked, rather than blocking on it — two callers racing always resolve to
+ * two different rows (or one gets null), never the same row twice.
  */
-export function claimNextJob(workerId: string, types?: JobType[]): JobRow | null {
+export async function claimNextJob(workerId: string, types?: JobType[]): Promise<JobRow | null> {
   const db = getDb();
   const now = Date.now();
+  const typeFilter = types?.length ? `AND type IN (${types.map(() => "?").join(",")})` : "";
 
-  const claimTxn = db.transaction(() => {
-    const typeFilter = types?.length ? `AND type IN (${types.map(() => "?").join(",")})` : "";
-    const candidate = db
-      .prepare(
-        `SELECT id FROM jobs
-         WHERE status = 'queued' AND run_after <= ? ${typeFilter}
-         ORDER BY priority DESC, created_at ASC
-         LIMIT 1`
-      )
-      .get(now, ...(types ?? [])) as { id: string } | undefined;
-    if (!candidate) return null;
+  const row = await db.prepare(`
+    WITH claimed AS (
+      SELECT id FROM jobs
+      WHERE status = 'queued' AND run_after <= ? ${typeFilter}
+      ORDER BY priority DESC, created_at ASC
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    UPDATE jobs SET status = 'running', locked_by = ?, locked_at = ?, updated_at = ?
+    WHERE id IN (SELECT id FROM claimed)
+    RETURNING *
+  `).get(now, ...(types ?? []), workerId, now, now) as JobRow | undefined;
 
-    db.prepare(
-      `UPDATE jobs SET status = 'running', locked_by = ?, locked_at = ?, updated_at = ? WHERE id = ? AND status = 'queued'`
-    ).run(workerId, now, now, candidate.id);
-
-    return db.prepare("SELECT * FROM jobs WHERE id = ?").get(candidate.id) as JobRow;
-  });
-
-  // Force an IMMEDIATE (write-locking) transaction rather than the default
-  // deferred one, so the SELECT+UPDATE pair is race-free when multiple
-  // workers poll concurrently — one wins the write lock, the rest simply see
-  // no queued row left and try again next poll.
-  db.pragma("busy_timeout = 5000");
-  return claimTxn.immediate();
+  return row ?? null;
 }
 
 /**
@@ -131,8 +124,8 @@ export function claimNextJob(workerId: string, types?: JobType[]): JobRow | null
  * and is silently ignored, which is correct: the outcome was already
  * decided by the reclaim.
  */
-export function completeJob(id: string, workerId: string, result?: Record<string, unknown>): void {
-  getDb()
+export async function completeJob(id: string, workerId: string, result?: Record<string, unknown>): Promise<void> {
+  await getDb()
     .prepare(
       `UPDATE jobs SET status = 'success', result = ?, locked_by = NULL, updated_at = ?
        WHERE id = ? AND status = 'running' AND locked_by = ?`
@@ -146,59 +139,59 @@ export function completeJob(id: string, workerId: string, result?: Record<string
  * lock holder may transition the job (same race guard as `completeJob`);
  * omit it only for the reaper's own forced-fail of an already-reclaimed row.
  */
-export function failJob(id: string, error: string, workerId?: string): { retried: boolean; nextAttempt?: number } {
+export async function failJob(id: string, error: string, workerId?: string): Promise<{ retried: boolean; nextAttempt?: number }> {
   const db = getDb();
   const lockFilter = workerId ? "AND locked_by = ?" : "";
   const lockArgs = workerId ? [workerId] : [];
 
-  const job = db.prepare(`SELECT * FROM jobs WHERE id = ? ${lockFilter}`).get(id, ...lockArgs) as JobRow | undefined;
+  const job = await db.prepare(`SELECT * FROM jobs WHERE id = ? ${lockFilter}`).get(id, ...lockArgs) as JobRow | undefined;
   if (!job) return { retried: false };
 
   const attempts = job.attempts + 1;
   const now = Date.now();
 
   if (attempts >= job.max_attempts) {
-    db.prepare(`UPDATE jobs SET status = 'dead', attempts = ?, last_error = ?, locked_by = NULL, updated_at = ? WHERE id = ? ${lockFilter}`)
+    await db.prepare(`UPDATE jobs SET status = 'dead', attempts = ?, last_error = ?, locked_by = NULL, updated_at = ? WHERE id = ? ${lockFilter}`)
       .run(attempts, error, now, id, ...lockArgs);
     return { retried: false };
   }
 
   const nextAttempt = now + backoffMs(attempts);
-  db.prepare(`
+  await db.prepare(`
     UPDATE jobs SET status = 'queued', attempts = ?, last_error = ?, run_after = ?, locked_by = NULL, updated_at = ? WHERE id = ? ${lockFilter}
   `).run(attempts, error, nextAttempt, now, id, ...lockArgs);
   return { retried: true, nextAttempt };
 }
 
 /** Release jobs stuck in 'running' past a stale threshold — a crashed worker's orphans. */
-export function reapStaleJobs(staleMs = 10 * 60_000): number {
+export async function reapStaleJobs(staleMs = 10 * 60_000): Promise<number> {
   const db = getDb();
   const cutoff = Date.now() - staleMs;
-  const stale = db.prepare("SELECT id, locked_by FROM jobs WHERE status = 'running' AND locked_at < ?").all(cutoff) as
+  const stale = await db.prepare("SELECT id, locked_by FROM jobs WHERE status = 'running' AND locked_at < ?").all(cutoff) as
     { id: string; locked_by: string | null }[];
-  for (const { id, locked_by } of stale) failJob(id, "Worker timed out or crashed while processing this job.", locked_by ?? undefined);
+  for (const { id, locked_by } of stale) await failJob(id, "Worker timed out or crashed while processing this job.", locked_by ?? undefined);
   return stale.length;
 }
 
 // ── Introspection (for the monitoring UI) ────────────────────────────────────
 
-export function listJobs(args: { workspaceId?: string; status?: JobStatus; limit?: number } = {}): JobRow[] {
+export async function listJobs(args: { workspaceId?: string; status?: JobStatus; limit?: number } = {}): Promise<JobRow[]> {
   const db = getDb();
   const workspaceId = args.workspaceId ?? DEFAULT_WORKSPACE_ID;
   const limit = Math.min(args.limit ?? 50, 200);
   if (args.status) {
     return db
       .prepare("SELECT * FROM jobs WHERE workspace_id = ? AND status = ? ORDER BY created_at DESC LIMIT ?")
-      .all(workspaceId, args.status, limit) as JobRow[];
+      .all(workspaceId, args.status, limit) as Promise<JobRow[]>;
   }
   return db
     .prepare("SELECT * FROM jobs WHERE workspace_id = ? ORDER BY created_at DESC LIMIT ?")
-    .all(workspaceId, limit) as JobRow[];
+    .all(workspaceId, limit) as Promise<JobRow[]>;
 }
 
-export function queueStats(workspaceId = DEFAULT_WORKSPACE_ID): Record<JobStatus, number> {
+export async function queueStats(workspaceId = DEFAULT_WORKSPACE_ID): Promise<Record<JobStatus, number>> {
   const db = getDb();
-  const rows = db
+  const rows = await db
     .prepare("SELECT status, COUNT(*) AS n FROM jobs WHERE workspace_id = ? GROUP BY status")
     .all(workspaceId) as { status: JobStatus; n: number }[];
   const out: Record<JobStatus, number> = { queued: 0, running: 0, success: 0, failed: 0, dead: 0 };
@@ -207,9 +200,9 @@ export function queueStats(workspaceId = DEFAULT_WORKSPACE_ID): Record<JobStatus
 }
 
 /** Manually requeue a dead-lettered job — used by the "Retry" button in the UI. */
-export function requeueJob(id: string): boolean {
+export async function requeueJob(id: string): Promise<boolean> {
   const db = getDb();
-  const res = db
+  const res = await db
     .prepare("UPDATE jobs SET status = 'queued', attempts = 0, run_after = ?, last_error = NULL, updated_at = ? WHERE id = ? AND status = 'dead'")
     .run(Date.now(), Date.now(), id);
   return res.changes > 0;

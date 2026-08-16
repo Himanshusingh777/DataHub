@@ -24,7 +24,7 @@ export const dynamic = "force-dynamic";
 const VALID_CHART_TYPES = CHART_TYPE_SET;
 
 export async function POST(req: NextRequest) {
-  const { userId, workspaceId } = getAuthContext(req);
+  const { userId, workspaceId } = await getAuthContext(req);
   if (!userId) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   let body: {
@@ -49,13 +49,13 @@ export async function POST(req: NextRequest) {
   const db = getDb();
 
   // Verify dashboard belongs to this workspace
-  const dashboard = db.prepare(
+  const dashboard = await db.prepare(
     "SELECT id FROM dashboards WHERE id = ? AND workspace_id = ?"
   ).get(dashboard_id, workspaceId);
   if (!dashboard) return NextResponse.json({ ok: false, error: "Dashboard not found" }, { status: 404 });
 
   // Verify model belongs to this workspace
-  const model = db.prepare(
+  const model = await db.prepare(
     "SELECT id, status FROM models WHERE id = ? AND workspace_id = ?"
   ).get(model_id, workspaceId) as { id: string; status: string } | undefined;
   if (!model) return NextResponse.json({ ok: false, error: "Model not found" }, { status: 404 });
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   const id  = `wgt_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   const now = Date.now();
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO widgets
       (id, dashboard_id, workspace_id, model_id, name, chart_type, config_json, position_json, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -76,9 +76,9 @@ export async function POST(req: NextRequest) {
   );
 
   // Touch the dashboard's updated_at
-  db.prepare("UPDATE dashboards SET updated_at = ? WHERE id = ?").run(now, dashboard_id);
+  await db.prepare("UPDATE dashboards SET updated_at = ? WHERE id = ?").run(now, dashboard_id);
 
-  const created = db.prepare("SELECT * FROM widgets WHERE id = ?").get(id) as Record<string, unknown>;
+  const created = await db.prepare("SELECT * FROM widgets WHERE id = ?").get(id) as Record<string, unknown>;
   return NextResponse.json({
     ok: true,
     widget: {
