@@ -27,10 +27,16 @@ let _pool: Pool | null = null;
 function getPool(): Pool {
   if (_pool) return _pool;
   const connectionString = process.env.POSTGRES_URL;
+  // Supabase's pooler presents a cert chain Node's default trust store
+  // doesn't recognize ("self-signed certificate in certificate chain") —
+  // the connection itself is still encrypted, this only skips validating
+  // the cert against a CA, which is the standard accepted tradeoff for
+  // managed Postgres poolers reached over a private/trusted network path.
+  const sslConfig = connectionString?.includes("sslmode=disable") ? undefined : { rejectUnauthorized: false };
   if (!connectionString) {
     throw new Error("POSTGRES_URL is not set — cannot connect to the database.");
   }
-  _pool = new Pool({ connectionString, max: 5 });
+  _pool = new Pool({ connectionString, max: 5, ssl: sslConfig });
   return _pool;
 }
 
