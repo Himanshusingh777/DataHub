@@ -64,28 +64,18 @@ const nextConfig: NextConfig = {
   // turbopack replaces experimental.turbo in Next.js 15.3+
   turbopack: {},
 
-  // Phase 1 of the Python/FastAPI backend migration: the dashboard-creation
-  // feature (dashboards, widgets, AI Dashboard Generator) now lives in
-  // backend/ (uvicorn on :8000). Proxying via `beforeFiles` rewrites keeps
-  // the browser calling same-origin, so ct_session/ct_workspace cookies pass
-  // through untouched — no CORS, no cross-site cookie config needed. Once
-  // this is verified working end-to-end, the superseded route.ts files under
-  // src/app/api/{dashboards,widgets}/** and
-  // src/app/api/models/[id]/generate-dashboard/** should be deleted.
+  // The Python/FastAPI backend (backend/, uvicorn on :8000) still reads
+  // from the old local SQLite file — it was never ported to Postgres (see
+  // "Phase 3" in the Vercel migration plan). The Next.js app now writes
+  // dashboards/widgets/models to Postgres, so anything proxied to Python
+  // can no longer see that data ("Model not found" on every request).
+  // Disabled these rewrites so requests fall through to the Next.js
+  // route.ts implementations under src/app/api/{dashboards,widgets}/** and
+  // src/app/api/models/[id]/generate-dashboard/** instead, which are
+  // already fully working against Postgres. Re-enable once the Python
+  // backend is ported (Phase 3) and verified against the same database.
   async rewrites() {
-    const pyApi = process.env.PY_API_URL ?? "http://localhost:8000";
-    return {
-      beforeFiles: [
-        { source: "/api/models/:id/generate-dashboard", destination: `${pyApi}/api/v1/models/:id/generate-dashboard` },
-        { source: "/api/models/:id/generate-dashboard/preview", destination: `${pyApi}/api/v1/models/:id/generate-dashboard/preview` },
-        { source: "/api/dashboards", destination: `${pyApi}/api/v1/dashboards` },
-        { source: "/api/dashboards/:id", destination: `${pyApi}/api/v1/dashboards/:id` },
-        { source: "/api/dashboards/:id/share", destination: `${pyApi}/api/v1/dashboards/:id/share` },
-        { source: "/api/widgets", destination: `${pyApi}/api/v1/widgets` },
-        { source: "/api/widgets/:id", destination: `${pyApi}/api/v1/widgets/:id` },
-        { source: "/api/widgets/:id/data", destination: `${pyApi}/api/v1/widgets/:id/data` },
-      ],
-    };
+    return { beforeFiles: [] };
   },
 
   async headers() {
