@@ -182,14 +182,6 @@ const OPENAPI_SPEC = {
         responses: { "201": { description: "Environment created" } },
       },
     },
-    "/api/automation/webhooks": {
-      get: { summary: "List webhooks", responses: { "200": { description: "Webhook list" } } },
-      post: {
-        summary: "Create webhook",
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["name", "url", "events"], properties: { name: { type: "string" }, url: { type: "string", format: "uri" }, events: { type: "array", items: { type: "string" } } } } } } },
-        responses: { "201": { description: "Webhook created with HMAC signing secret" } },
-      },
-    },
     "/api/observability": {
       get: { summary: "Platform observability snapshot", description: "Returns queue, worker, connector, and warehouse metrics.", responses: { "200": { description: "Observability payload" } } },
     },

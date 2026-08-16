@@ -108,7 +108,7 @@ export default function RegisterPage() {
       setRegisteredEmail(data.email);
       setVerificationSent(true);
       // Brief delay to show verification notice, then redirect
-      await new Promise(r => setTimeout(r, 2200));
+      await new Promise(r => setTimeout(r, 600));
       startWizard();
       router.push(ROUTES.DASHBOARD);
     }

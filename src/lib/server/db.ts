@@ -293,19 +293,6 @@ function migrate(db: any) {
       UNIQUE(workspace_id, env_id, key_name)
     );
 
-    -- Workflow automation rules
-    CREATE TABLE IF NOT EXISTS automations (
-      id           TEXT PRIMARY KEY,
-      workspace_id TEXT NOT NULL DEFAULT 'default',
-      user_id      TEXT NOT NULL,
-      name         TEXT NOT NULL,
-      trigger_type TEXT NOT NULL, -- 'pre_sync' | 'post_sync' | 'on_failure' | 'schedule'
-      trigger_meta TEXT,          -- JSON
-      action_type  TEXT NOT NULL, -- 'webhook' | 'email' | 'retry' | 'transform'
-      action_meta  TEXT,          -- JSON
-      enabled      INTEGER NOT NULL DEFAULT 1,
-      created_at   INTEGER NOT NULL
-    );
   `);
 
   // ── Workspace members (multi-user per workspace) ──────────────────────────
@@ -336,13 +323,11 @@ function migrate(db: any) {
   // Workspace scoping for tables that didn't have it at creation time
   addColumnIfMissing(db, "runs",          "workspace_id", "TEXT NOT NULL DEFAULT 'default'");
   addColumnIfMissing(db, "query_history", "workspace_id", "TEXT NOT NULL DEFAULT 'default'");
-  addColumnIfMissing(db, "automations",   "workspace_id", "TEXT NOT NULL DEFAULT 'default'");
-  // Schedule-trigger tracking (mirrors flows.next_run_at) + last-fire status,
-  // surfaced in the Automation UI and used by the scheduler tick.
-  addColumnIfMissing(db, "automations",   "next_run_at",  "INTEGER");
-  addColumnIfMissing(db, "automations",   "last_fired_at", "INTEGER");
-  addColumnIfMissing(db, "automations",   "last_status",  "TEXT"); // 'success' | 'error'
   addColumnIfMissing(db, "models",        "version",      "INTEGER NOT NULL DEFAULT 1");
+  // Links a Model back to the Query Studio saved_queries row it was
+  // auto-created from (see lib/server/models-sync.ts) — NULL for models
+  // created directly on the Models page.
+  addColumnIfMissing(db, "models",        "source_saved_query_id", "TEXT");
   addColumnIfMissing(db, "api_keys",      "workspace_id", "TEXT NOT NULL DEFAULT 'default'");
   addColumnIfMissing(db, "environments",  "workspace_id", "TEXT NOT NULL DEFAULT 'default'");
   // Augment catalog_tables to support multi-connector (not just BQ)

@@ -23,6 +23,7 @@ export const RATE_LIMITS = {
   credentials: { limit: 20, windowMs: 60_000 } as RateLimitConfig, // vault writes
   sync: { limit: 10, windowMs: 60_000 } as RateLimitConfig,        // manual sync triggers
   warehouse: { limit: 30, windowMs: 60_000 } as RateLimitConfig,   // BigQuery-backed reads (cost-sensitive)
+  aiSql: { limit: 15, windowMs: 60_000 } as RateLimitConfig,       // AI SQL Assistant generations (external LLM call)
   default: { limit: 120, windowMs: 60_000 } as RateLimitConfig,
 } as const;
 

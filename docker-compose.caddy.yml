@@ -1,0 +1,31 @@
+# Optional overlay: HTTPS via Caddy (automatic Let's Encrypt cert), for when
+# you have a domain pointed at the server. Use with:
+#   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d --build
+#
+# Requires DOMAIN set in .env, e.g. DOMAIN=app.yourdomain.com, and DNS A/AAAA
+# records for that domain already pointing at this server's IP.
+#
+# Note: web's port 3000 stays published alongside Caddy's 80/443 (Compose
+# override files merge port lists, they don't replace them). That's harmless
+# — the app is just reachable both via https://yourdomain and directly via
+# http://server-ip:3000. If you want 3000 closed off, block it in ufw:
+#   ufw deny 3000
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+
+volumes:
+  caddy_data:
+  caddy_config:

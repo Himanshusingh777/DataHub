@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthContext } from "@/lib/server/auth";
 import { getDb } from "@/lib/server/db";
+import { syncModelFromSavedQuery } from "@/lib/server/models-sync";
 import { randomUUID } from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,13 @@ export async function POST(req: NextRequest) {
     INSERT INTO saved_queries (id, user_id, workspace_id, name, description, sql, tags, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(id, userId, workspaceId, body.name.trim(), body.description ?? null, body.sql.trim(), JSON.stringify(body.tags ?? []), now, now);
+
+  // Every saved query is also kept as a Semantic Model, so it's immediately
+  // usable on dashboards without a separate "create model" step.
+  syncModelFromSavedQuery({
+    db, workspaceId, userId, savedQueryId: id,
+    name: body.name.trim(), description: body.description ?? null, sql: body.sql.trim(),
+  });
 
   const query = db.prepare("SELECT * FROM saved_queries WHERE id = ?").get(id);
   return NextResponse.json({ query });

@@ -54,9 +54,6 @@ export const ROUTES = {
   WORKSPACE:    "/workspace",
   ENVIRONMENTS: "/environments",
 
-  // Automation (Phase F)
-  AUTOMATION: "/automation",
-
   // Observability & AI Ops (Phase G+H)
   OBSERVABILITY: "/observability",
   AI_OPS:        "/ai-ops",

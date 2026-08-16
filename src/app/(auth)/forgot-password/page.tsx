@@ -31,7 +31,7 @@ export default function ForgotPasswordPage() {
 
   async function onSubmit(data: FormValues) {
     setIsLoading(true);
-    await new Promise((r) => setTimeout(r, 1200));
+    await new Promise((r) => setTimeout(r, 300));
     setSubmittedEmail(data.email);
     setIsLoading(false);
     setSubmitted(true);

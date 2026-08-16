@@ -1,0 +1,7 @@
+node_modules
+.next
+.crosstecch
+.git
+.env.local
+backend
+*.log

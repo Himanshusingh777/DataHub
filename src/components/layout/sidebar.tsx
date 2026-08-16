@@ -16,7 +16,6 @@ import {
   ShieldCheck,
   Activity,
   BookMarked,
-  Workflow,
   GitBranch,
   Layers,
   LayoutGrid,
@@ -50,7 +49,6 @@ const NAV_ITEMS = [
   { label: "Dashboards",     icon: LayoutGrid,      href: "/dashboards" },
   { label: "Catalog",        icon: BookMarked,      href: "/catalog" },
   { label: "Lineage",        icon: GitBranch,       href: "/lineage" },
-  { label: "Automation",     icon: Workflow,        href: "/automation" },
   { label: "Observability",  icon: Activity,        href: "/observability" },
 ];
 

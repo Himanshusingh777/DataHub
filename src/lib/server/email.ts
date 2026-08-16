@@ -1,6 +1,6 @@
 /**
- * Transactional email — shared by password reset and Automation's "email"
- * action. Uses Resend if RESEND_API_KEY is set; logs to console otherwise
+ * Transactional email — used by password reset. Uses Resend if
+ * RESEND_API_KEY is set; logs to console otherwise
  * (development fallback, not a fake send — no email is silently dropped,
  * the intended content is always visible in server logs).
  */

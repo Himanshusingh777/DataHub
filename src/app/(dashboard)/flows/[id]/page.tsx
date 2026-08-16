@@ -990,7 +990,7 @@ export default function FlowDetailPage({ params }: { params: Promise<{ id: strin
       });
     } else {
       // Simulated sync for demo connectors
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 700));
       const rows = Math.floor(Math.random() * 1200 + 150);
       appendRun(flow.id, {
         id: `run-${Date.now()}`,

@@ -136,6 +136,32 @@ export interface WidgetFilter {
   value: unknown;
 }
 
+/**
+ * Client-side data prep applied to a widget's already-fetched rows, before
+ * they reach the chart renderer. Lets a widget's config declare "group by X,
+ * sum Y" (or "collapse to one aggregate", or "top N rows") instead of relying
+ * on the bound model's SQL already being at the right grain — the row cap
+ * (5,000, see /api/widgets/[id]/data) makes this a safe client-side op.
+ * Consumed by ChartEngine (components/charts/chart-engine.tsx); produced by
+ * the AI Dashboard Generator (lib/bi/ai-dashboard-generator.ts), but any
+ * widget's config can set it manually too.
+ */
+export interface WidgetAggregateConfig {
+  /** Field to group rows by. Omit to collapse ALL rows into a single aggregate. */
+  groupBy?:    string;
+  /** Second group-by field, for two-key aggregation (e.g. heatmap x/y). */
+  groupBy2?:   string;
+  /** Field to aggregate (or sort by, when fn is "top"). */
+  valueField:  string;
+  /** "top" sorts+slices the original rows unchanged (no grouping). */
+  fn:          "sum" | "avg" | "count" | "count_distinct" | "min" | "max" | "top";
+  /** Buckets a date/timestamp groupBy field into a coarser period. */
+  dateBucket?: "day" | "week" | "month" | "quarter" | "year";
+  /** Cap the number of output rows (groups, or raw rows when fn is "top"). */
+  topN?:       number;
+  sortDir?:    "asc" | "desc";
+}
+
 export interface WidgetConfig {
   // ── Axis / data mapping ─────────────────────────────────────────────────
   xField?:        string;         // primary category / time axis
@@ -184,6 +210,9 @@ export interface WidgetConfig {
 
   // ── Filters ────────────────────────────────────────────────────────────
   filters?:       WidgetFilter[];
+
+  // ── Client-side aggregation (group-by / collapse / top-N) ──────────────
+  aggregate?:     WidgetAggregateConfig;
 
   // ── Layout ─────────────────────────────────────────────────────────────
   position?:      WidgetPosition;

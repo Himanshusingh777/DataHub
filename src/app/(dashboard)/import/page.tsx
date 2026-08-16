@@ -350,8 +350,6 @@ export default function ImportPage() {
       const json = await res.json();
       setImportProgress(100);
 
-      await new Promise((r) => setTimeout(r, 400));
-
       if (json.ok) {
         setResult(json);
         setStep("success");

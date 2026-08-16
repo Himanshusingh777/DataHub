@@ -88,7 +88,7 @@ function ProfileTab() {
 
   async function handleSave() {
     setSaving(true);
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 300));
     setSaving(false);
     toast.success("Profile updated", "Your profile changes have been saved.");
   }
@@ -161,7 +161,7 @@ function WorkspaceTab() {
 
   async function handleSave() {
     setSaving(true);
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 300));
     setSaving(false);
     toast.success("Workspace updated", "Workspace settings have been saved.");
   }
@@ -644,7 +644,7 @@ function SecurityTab() {
     if (newPwd !== confirmPwd) { toast.error("Passwords do not match"); return; }
     if (newPwd.length < 8) { toast.error("Password must be at least 8 characters"); return; }
     setSaving(true);
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 300));
     setSaving(false);
     setChanging(false);
     setCurrentPwd(""); setNewPwd(""); setConfirmPwd("");
@@ -1012,7 +1012,7 @@ function MembersTab() {
   async function handleInvite() {
     if (!inviteEmail.includes("@")) { toast.error("Enter a valid email address"); return; }
     setInviting(true);
-    await new Promise(r => setTimeout(r, 700));
+    await new Promise(r => setTimeout(r, 300));
     const newMember: Member = {
       id: `m${Date.now()}`,
       name: inviteEmail.split("@")[0],

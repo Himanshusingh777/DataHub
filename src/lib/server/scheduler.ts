@@ -15,7 +15,7 @@
  * globally, so N flows now run in parallel rather than one at a time.
  */
 
-import { getDb, computeNextRun } from "./db";
+import { getDb } from "./db";
 import type { FlowRow } from "./runner";
 import { enqueueJob } from "./jobs";
 
@@ -44,41 +44,6 @@ function maybeEnqueueDailyRollup() {
   }
 }
 
-/**
- * Same due-check/enqueue/reschedule pattern as flows above, for
- * schedule-triggered automation rules (lib/server/automation.ts). Each due
- * rule's next_run_at is advanced immediately (before the job even runs) so
- * a slow or retrying webhook can't cause the same firing to be re-enqueued
- * next tick — identical reasoning to why flows compute next_run_at eagerly.
- */
-function tickScheduledAutomations() {
-  const db = getDb();
-  const due = db.prepare(`
-    SELECT id, workspace_id, trigger_meta
-    FROM automations
-    WHERE trigger_type = 'schedule' AND enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?
-    LIMIT ?
-  `).all(Date.now(), MAX_DUE_PER_TICK) as { id: string; workspace_id: string; trigger_meta: string | null }[];
-
-  for (const rule of due) {
-    let scheduleValue = "every_hour";
-    try {
-      const meta = rule.trigger_meta ? JSON.parse(rule.trigger_meta) : {};
-      if (typeof meta.scheduleValue === "string") scheduleValue = meta.scheduleValue;
-    } catch { /* fall back to hourly */ }
-
-    const nextRunAt = computeNextRun(scheduleValue);
-    db.prepare("UPDATE automations SET next_run_at = ? WHERE id = ?").run(nextRunAt, rule.id);
-
-    const jobId = enqueueJob(
-      "fire_automation",
-      { automationId: rule.id },
-      { workspaceId: rule.workspace_id, dedupeKey: `automation:${rule.id}`, priority: -5 }
-    );
-    console.log(`[scheduler] enqueued automation ${rule.id} as job ${jobId}`);
-  }
-}
-
 function tick() {
   try {
     const db = getDb();
@@ -98,7 +63,6 @@ function tick() {
       console.log(`[scheduler] enqueued sync for flow ${flow.id} (${flow.source_id} → ${flow.dest_id}) as job ${jobId}`);
     }
 
-    tickScheduledAutomations();
     maybeEnqueueDailyRollup();
   } catch (e) {
     // DB driver missing or transient error — stay quiet but visible

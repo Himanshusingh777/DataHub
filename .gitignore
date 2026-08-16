@@ -12,6 +12,11 @@ out/
 # CrossTecch backend — database + encryption key (NEVER commit)
 .crosstecch/
 
+# Python backend
+backend/.venv/
+backend/**/__pycache__/
+*.pyc
+
 # Misc
 .DS_Store
 *.log

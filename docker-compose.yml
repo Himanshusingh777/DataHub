@@ -1,0 +1,38 @@
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - crosstecch_data:/app/.crosstecch
+    environment:
+      NODE_ENV: production
+      PY_API_URL: http://api:8000
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      NEXT_PUBLIC_ADMIN_EMAIL: ${ADMIN_EMAIL}
+      CROSSTECCH_SECRET_KEY: ${CROSSTECCH_SECRET_KEY}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-}
+      BIGQUERY_DEFAULT_LOCATION: ${BIGQUERY_DEFAULT_LOCATION:-US}
+      BIGQUERY_DEFAULT_DATASET: ${BIGQUERY_DEFAULT_DATASET:-crosstecch_data}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+    depends_on:
+      - api
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    volumes:
+      - crosstecch_data:/data
+    environment:
+      CROSSTECCH_DATA_DIR: /data
+      CROSSTECCH_SECRET_KEY: ${CROSSTECCH_SECRET_KEY}
+      BIGQUERY_DEFAULT_LOCATION: ${BIGQUERY_DEFAULT_LOCATION:-US}
+      BIGQUERY_DEFAULT_DATASET: ${BIGQUERY_DEFAULT_DATASET:-crosstecch_data}
+      FRONTEND_ORIGIN: ${APP_URL:-http://localhost:3000}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-4}
+
+volumes:
+  crosstecch_data:

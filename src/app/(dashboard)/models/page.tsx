@@ -15,15 +15,20 @@
  */
 
 import React from "react";
+import { useRouter } from "next/navigation";
 import {
   Layers, Plus, Trash2, Loader2, AlertTriangle, Play, ChevronRight, ChevronDown,
-  History, Table2, CheckCircle2, XCircle, Clock, GitCommitHorizontal,
+  History, Table2, CheckCircle2, XCircle, Clock, GitCommitHorizontal, Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
-import type { ModelStatus, SchemaColumn } from "@/lib/models-data";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
+import { ROUTES } from "@/config/routes";
+import { CHART_LABELS, type ChartType, type ModelStatus, type SchemaColumn } from "@/lib/models-data";
 
 // ── Types (mirror the API response shapes) ──────────────────────────────────
 
@@ -146,6 +151,216 @@ function NewModelForm({ onCreated }: { onCreated: (id: string) => void }) {
   );
 }
 
+// ── Generate AI Dashboard ──────────────────────────────────────────────────
+// Heuristic, local-only analysis (see lib/bi/ai-dashboard-generator.ts) — no
+// external AI call. Two ways in, same analysis underneath:
+//   - "Generate AI Dashboard" — one click, no questions asked: builds the
+//     curated ~10-widget default set (each candidate's `recommended` flag)
+//     immediately, exactly like the original one-shot flow.
+//   - "Customize charts" — opens every candidate the analyzer found in a
+//     checklist so the user picks exactly which ones become widgets.
+// Both paths call the same preview endpoint and the same create endpoint —
+// "Customize" just interposes a selection step instead of auto-selecting.
+
+type WidgetCategory = "kpi" | "trend" | "chart" | "table";
+
+interface WidgetCandidate {
+  id: string;
+  name: string;
+  chart_type: ChartType;
+  category: WidgetCategory;
+  reason: string;
+  recommended: boolean;
+  config: Record<string, unknown>;
+}
+
+const CATEGORY_LABELS: Record<WidgetCategory, string> = {
+  kpi: "KPI Cards", trend: "Trend", chart: "Charts", table: "Tables",
+};
+const CATEGORY_ORDER: WidgetCategory[] = ["kpi", "trend", "chart", "table"];
+const GENERATE_STEPS = ["Analyzing model…", "Generating charts…", "Creating dashboard…", "Opening dashboard…"];
+
+function GenerateAiDashboardButton({ modelId, modelName, enabled }: { modelId: string; modelName: string; enabled: boolean }) {
+  const [autoBusy, setAutoBusy] = React.useState(false);
+  const [autoStep, setAutoStep] = React.useState(0);
+  const [loadingPreview, setLoadingPreview] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
+  const [candidates, setCandidates] = React.useState<WidgetCandidate[]>([]);
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [creating, setCreating] = React.useState(false);
+  const router = useRouter();
+  const { toast } = useToast();
+
+  async function fetchPreview(): Promise<WidgetCandidate[] | null> {
+    const res = await fetch(`/api/models/${modelId}/generate-dashboard/preview`, { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) { toast.error("Could not analyze model", data.error ?? "Unknown error"); return null; }
+    return data.candidates;
+  }
+
+  async function createDashboard(chosen: WidgetCandidate[]) {
+    const res = await fetch(`/api/models/${modelId}/generate-dashboard`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ candidates: chosen }),
+    });
+    return res.json();
+  }
+
+  // One click, curated default set, no picker — the original behavior.
+  async function autoGenerate() {
+    setAutoBusy(true);
+    setAutoStep(0);
+    const timer = setInterval(() => setAutoStep((s) => Math.min(s + 1, GENERATE_STEPS.length - 2)), 600);
+    try {
+      const list = await fetchPreview();
+      if (!list) { clearInterval(timer); setAutoBusy(false); return; }
+      const chosen = list.filter((c) => c.recommended);
+      const data = await createDashboard(chosen.length ? chosen : list);
+      clearInterval(timer);
+      if (!data.ok) { toast.error("Could not generate dashboard", data.error ?? "Unknown error"); setAutoBusy(false); return; }
+      setAutoStep(GENERATE_STEPS.length - 1);
+      toast.success("Dashboard generated", `${data.widgetCount} widgets created from "${modelName}"`);
+      router.push(`${ROUTES.DASHBOARDS}/${data.dashboard.id}`);
+    } catch {
+      clearInterval(timer);
+      toast.error("Could not generate dashboard", "Network error.");
+      setAutoBusy(false);
+    }
+  }
+
+  // Opens the picker, pre-checking the same curated set autoGenerate() would use.
+  async function openCustomize() {
+    setLoadingPreview(true);
+    try {
+      const list = await fetchPreview();
+      if (!list) return;
+      setCandidates(list);
+      setSelected(new Set(list.filter((c) => c.recommended).map((c) => c.id)));
+      setOpen(true);
+    } finally {
+      setLoadingPreview(false);
+    }
+  }
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function createFromSelection() {
+    const chosen = candidates.filter((c) => selected.has(c.id));
+    if (chosen.length === 0) { toast.error("Select at least one chart"); return; }
+    setCreating(true);
+    try {
+      const data = await createDashboard(chosen);
+      if (!data.ok) { toast.error("Could not create dashboard", data.error ?? "Unknown error"); return; }
+      toast.success("Dashboard created", `${data.widgetCount} widgets added from "${modelName}"`);
+      setOpen(false);
+      router.push(`${ROUTES.DASHBOARDS}/${data.dashboard.id}`);
+    } catch {
+      toast.error("Could not create dashboard", "Network error.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  const grouped = CATEGORY_ORDER
+    .map((cat) => ({ cat, items: candidates.filter((c) => c.category === cat) }))
+    .filter((g) => g.items.length > 0);
+
+  return (
+    <>
+      <div className="flex items-center gap-1.5">
+        <Button
+          size="sm" className="h-8 gap-1.5 text-xs" onClick={autoGenerate}
+          disabled={!enabled || autoBusy || loadingPreview}
+          title={!enabled ? "Run this model at least once to enable AI Dashboard generation" : "Instantly build a dashboard from a curated set of charts"}
+        >
+          {autoBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          {autoBusy ? GENERATE_STEPS[autoStep] : "Generate AI Dashboard"}
+        </Button>
+        <Button
+          variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={openCustomize}
+          disabled={!enabled || autoBusy || loadingPreview}
+          title="See every suggested chart and pick which ones to include"
+        >
+          {loadingPreview ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          Customize charts
+        </Button>
+      </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Choose charts for &ldquo;{modelName}&rdquo;</DialogTitle>
+            <DialogDescription>
+              {selected.size} of {candidates.length} selected — pick what you want on the dashboard, then create it.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center gap-3 text-xs">
+            <button type="button" className="text-brand-600 hover:underline" onClick={() => setSelected(new Set(candidates.map((c) => c.id)))}>
+              Select all
+            </button>
+            <button type="button" className="text-brand-600 hover:underline" onClick={() => setSelected(new Set())}>
+              Deselect all
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            {grouped.map(({ cat, items }) => (
+              <div key={cat}>
+                <h4 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {CATEGORY_LABELS[cat]}
+                </h4>
+                <div className="space-y-1">
+                  {items.map((c) => (
+                    <label
+                      key={c.id}
+                      className="flex cursor-pointer items-start gap-2 rounded-lg border border-border p-2 text-xs hover:bg-accent/20"
+                    >
+                      <input
+                        type="checkbox" className="mt-0.5" checked={selected.has(c.id)}
+                        onChange={() => toggle(c.id)}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-foreground">{c.name}</span>
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                            {CHART_LABELS[c.chart_type]}
+                          </span>
+                          {c.recommended && (
+                            <span className="rounded bg-brand-100 px-1.5 py-0.5 text-[10px] font-medium text-brand-700 dark:bg-brand-950 dark:text-brand-400">
+                              Recommended
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">{c.reason}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button size="sm" className="gap-1.5" onClick={createFromSelection} disabled={creating || selected.size === 0}>
+              {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              Create Dashboard ({selected.size})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 // ── Model detail / editor panel ──────────────────────────────────────────────
 
 function ModelPanel({ id, onChanged, onDeleted }: { id: string; onChanged: () => void; onDeleted: () => void }) {
@@ -259,6 +474,7 @@ function ModelPanel({ id, onChanged, onDeleted }: { id: string; onChanged: () =>
         <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setShowVersions((v) => !v)}>
           <History className="h-3.5 w-3.5" /> Versions ({detail.versions.length + 1})
         </Button>
+        <GenerateAiDashboardButton modelId={detail.id} modelName={detail.name} enabled={detail.schema.length > 0} />
         <div className="flex-1" />
         <Button
           variant="outline" size="sm" className="h-8 gap-1.5 text-xs text-rose-600 hover:text-rose-600"

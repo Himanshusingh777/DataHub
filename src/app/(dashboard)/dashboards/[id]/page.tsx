@@ -22,7 +22,7 @@ import React, { use } from "react";
 import Link from "next/link";
 import {
   ArrowLeft, Plus, Loader2, AlertTriangle, Share2, Copy, X, Trash2,
-  Settings2, LayoutDashboard,
+  Settings2, LayoutDashboard, Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -54,13 +54,113 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   } catch { return null; }
 }
 
+// ── Edit widget form: chart type, X/Y fields, width/height — reuses the
+//    same PUT /api/widgets/[id] the backend already exposed with no UI ────
+
+function EditWidgetForm({
+  widget, models, onSaved, onCancel,
+}: {
+  widget: Widget; models: ModelOption[]; onSaved: () => void; onCancel: () => void;
+}) {
+  const [name, setName] = React.useState(widget.name);
+  const [chartType, setChartType] = React.useState<ChartType>(widget.chart_type);
+  const [xField, setXField] = React.useState(widget.config.xField ?? "");
+  const [yField, setYField] = React.useState(widget.config.yField ?? "");
+  const [w, setW] = React.useState(widget.position.w || 6);
+  const [h, setH] = React.useState(widget.position.h || 4);
+  const [saving, setSaving] = React.useState(false);
+  const { toast } = useToast();
+  const model = models.find((m) => m.id === widget.model_id);
+
+  async function save() {
+    if (!name.trim()) { toast.error("Name required"); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/widgets/${widget.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          chart_type: chartType,
+          config:   { ...widget.config, xField: xField || undefined, yField: yField || undefined },
+          position: { ...widget.position, w: Math.min(12, Math.max(2, w || 6)), h: Math.max(2, h || 4) },
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) { toast.error("Could not save widget", data.error ?? "Unknown error"); return; }
+      toast.success("Widget updated");
+      onSaved();
+    } catch {
+      toast.error("Could not save widget", "Network error.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+      <input
+        value={name} onChange={(e) => setName(e.target.value)} placeholder="Widget name"
+        className="h-8 w-full rounded-md border border-border bg-white px-2 text-xs dark:bg-[#0e0f1a] focus:outline-none focus:ring-2 focus:ring-brand-500"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <select
+          value={chartType} onChange={(e) => setChartType(e.target.value as ChartType)}
+          className="col-span-2 h-8 w-full rounded-md border border-border bg-white px-2 text-xs dark:bg-[#0e0f1a] focus:outline-none focus:ring-2 focus:ring-brand-500"
+        >
+          {ALL_CHART_TYPES.map((t) => <option key={t} value={t}>{CHART_LABELS[t]}</option>)}
+        </select>
+        <select
+          value={xField} onChange={(e) => setXField(e.target.value)}
+          className="h-8 w-full rounded-md border border-border bg-white px-2 text-xs dark:bg-[#0e0f1a] focus:outline-none focus:ring-2 focus:ring-brand-500"
+        >
+          <option value="">Auto X field</option>
+          {model?.schema.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+        <select
+          value={yField} onChange={(e) => setYField(e.target.value)}
+          className="h-8 w-full rounded-md border border-border bg-white px-2 text-xs dark:bg-[#0e0f1a] focus:outline-none focus:ring-2 focus:ring-brand-500"
+        >
+          <option value="">Auto Y field</option>
+          {model?.schema.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+        </select>
+        <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          Width (cols)
+          <input
+            type="number" min={2} max={12} value={w} onChange={(e) => setW(Number(e.target.value))}
+            className="h-7 w-16 rounded-md border border-border bg-white px-2 text-xs dark:bg-[#0e0f1a]"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          Height (rows)
+          <input
+            type="number" min={2} max={12} value={h} onChange={(e) => setH(Number(e.target.value))}
+            className="h-7 w-16 rounded-md border border-border bg-white px-2 text-xs dark:bg-[#0e0f1a]"
+          />
+        </label>
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onCancel}>Cancel</Button>
+        <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={save} disabled={saving}>
+          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ── Widget card: fetches + renders its own live data ─────────────────────────
 
-function WidgetCard({ widget, onDelete }: { widget: Widget; onDelete: () => void }) {
+function WidgetCard({
+  widget, models, onDelete, onUpdated,
+}: {
+  widget: Widget; models: ModelOption[]; onDelete: () => void; onUpdated: () => void;
+}) {
   const [rows, setRows] = React.useState<Record<string, unknown>[] | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [meta, setMeta] = React.useState<{ rowCount: number; durationMs: number; bytesProcessed: number } | null>(null);
+  const [editing, setEditing] = React.useState(false);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -91,23 +191,37 @@ function WidgetCard({ widget, onDelete }: { widget: Widget; onDelete: () => void
           <button onClick={load} className="text-muted-foreground hover:text-foreground" title="Refresh">
             {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <span className="text-[10px]">↻</span>}
           </button>
+          <button onClick={() => setEditing((v) => !v)} className="text-muted-foreground hover:text-foreground" title="Edit widget">
+            <Pencil className="h-3 w-3" />
+          </button>
           <button onClick={onDelete} className="text-muted-foreground hover:text-rose-600" title="Delete widget">
             <Trash2 className="h-3 w-3" />
           </button>
         </div>
       </div>
-      <div className="flex-1">
-        <ChartEngine
-          chartType={widget.chart_type}
-          data={rows ?? []}
-          config={widget.config}
-          height={(widget.position.h || 4) * 60}
-          loading={loading}
-          error={error}
+      {editing ? (
+        <EditWidgetForm
+          widget={widget}
+          models={models}
+          onCancel={() => setEditing(false)}
+          onSaved={() => { setEditing(false); onUpdated(); }}
         />
-      </div>
-      {meta && !loading && !error && (
-        <p className="mt-2 text-[9px] text-muted-foreground/70">{meta.rowCount.toLocaleString()} rows · {meta.durationMs}ms</p>
+      ) : (
+        <>
+          <div className="flex-1">
+            <ChartEngine
+              chartType={widget.chart_type}
+              data={rows ?? []}
+              config={widget.config}
+              height={(widget.position.h || 4) * 60}
+              loading={loading}
+              error={error}
+            />
+          </div>
+          {meta && !loading && !error && (
+            <p className="mt-2 text-[9px] text-muted-foreground/70">{meta.rowCount.toLocaleString()} rows · {meta.durationMs}ms</p>
+          )}
+        </>
       )}
     </div>
   );
@@ -370,7 +484,7 @@ export default function DashboardBuilderPage({ params }: { params: Promise<{ id:
       ) : (
         <div className="grid grid-cols-12 gap-4">
           {dashboard.widgets.map((w) => (
-            <WidgetCard key={w.id} widget={w} onDelete={() => deleteWidget(w.id)} />
+            <WidgetCard key={w.id} widget={w} models={models} onDelete={() => deleteWidget(w.id)} onUpdated={load} />
           ))}
         </div>
       )}

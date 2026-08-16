@@ -332,6 +332,24 @@ export function FlowWizardModal() {
   const [creating, setCreating] = React.useState(false);
   const [createError, setCreateError] = React.useState<string | null>(null);
 
+  // BigQuery destination auth — only asked for here when the workspace has
+  // no BigQuery credentials yet, so a brand-new workspace never has to visit
+  // Settings → Integrations before it can create its first flow.
+  const [bqConfigured, setBqConfigured] = React.useState<boolean | null>(null);
+  const [bqVerified, setBqVerified] = React.useState(false);
+  const [bqProjectId, setBqProjectId] = React.useState("");
+  const [bqServiceJson, setBqServiceJson] = React.useState("");
+  const [bqTesting, setBqTesting] = React.useState(false);
+  const [bqError, setBqError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!store.active) return;
+    fetch("/api/warehouse/status")
+      .then(res => res.json())
+      .then(data => setBqConfigured(!!data.configured))
+      .catch(() => setBqConfigured(false));
+  }, [store.active]);
+
   if (!store.active) return null;
 
   function reset() {
@@ -339,6 +357,43 @@ export function FlowWizardModal() {
     setAuthError(null); setCsv(null); setParseError(null);
     setDataset(""); setTableName(""); setFlowName("");
     setSchedule("manual"); setCreating(false); setCreateError(null);
+    setBqVerified(false); setBqProjectId(""); setBqServiceJson(""); setBqError(null);
+  }
+
+  /** Save + verify BigQuery destination credentials entered inline in the
+   *  wizard — same save-then-test pattern as Settings' BigQuerySection. */
+  async function handleConnectBigQuery(): Promise<boolean> {
+    setBqTesting(true); setBqError(null);
+    try {
+      await fetch("/api/credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          service: "bigquery",
+          data: {
+            project_id: bqProjectId.trim(),
+            dataset: dataset.trim() || "crosstecch_data",
+            service_json: bqServiceJson.trim(),
+            location: "US",
+          },
+        }),
+      });
+      const res = await fetch("/api/bigquery/test", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        setBqVerified(true); setBqConfigured(true);
+        return true;
+      }
+      setBqError(data.error ?? "Could not verify BigQuery credentials");
+      return false;
+    } catch {
+      setBqError("Network error — please try again");
+      return false;
+    } finally {
+      setBqTesting(false);
+    }
   }
 
   function close() { store.closeWizard(); reset(); }
@@ -422,7 +477,12 @@ export function FlowWizardModal() {
             sourceId: "csv", sourceName: "CSV Upload",
             destId: "bigquery", destName: "BigQuery",
             scheduleValue: schedule,
-            warehouseTable: `${importData.dataset}.${tableName}`,
+            // Bare table name only — `dataset` is already its own field below.
+            // Prefixing it here too used to store e.g. "frugal1_data.order" in
+            // warehouse_table, which every consumer (runner.ts, the AI SQL
+            // Assistant's table discovery, dependency lookup) treats as a
+            // single opaque table name, not a "dataset.table" pair.
+            warehouseTable: tableName,
             dataset: importData.dataset, syncMode: "full",
           }),
         });
@@ -438,7 +498,12 @@ export function FlowWizardModal() {
             sourceId: selectedConn.id, sourceName: selectedConn.name,
             destId: "bigquery", destName: "BigQuery",
             scheduleValue: schedule,
-            warehouseTable: `${dataset || "default"}.${tableName}`,
+            // Bare table name only — see the CSV branch above for why. For
+            // multi-object connectors (e.g. Instantly: campaigns/leads/
+            // analytics) this default is only a starting guess anyway; the
+            // sync runner self-heals it to whichever object's real table name
+            // it actually loads (see runner.ts).
+            warehouseTable: tableName,
             dataset: dataset || undefined, syncMode: "full",
           }),
         });
@@ -453,7 +518,7 @@ export function FlowWizardModal() {
       }
 
       go("done");
-      setTimeout(() => { close(); router.refresh(); }, 2000);
+      setTimeout(() => { close(); router.refresh(); }, 900);
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : "Something went wrong");
       go("review");
@@ -473,7 +538,11 @@ export function FlowWizardModal() {
       if (selectedConn?.id === "csv") return !!csv;
       return selectedConn?.authFields.every(f => creds[f.key]?.trim()) ?? false;
     }
-    if (step === "dataset") return !!tableName.trim();
+    if (step === "dataset") {
+      if (!tableName.trim()) return false;
+      if (bqConfigured === false && !bqVerified) return !!bqProjectId.trim() && !!bqServiceJson.trim();
+      return true;
+    }
     return true;
   })();
 
@@ -484,7 +553,11 @@ export function FlowWizardModal() {
       if (selectedConn?.id === "csv") go("dataset");
       else handleAuth();
     } else if (step === "dataset") {
-      go("schedule");
+      if (bqConfigured === false && !bqVerified) {
+        handleConnectBigQuery().then(ok => { if (ok) go("schedule"); });
+      } else {
+        go("schedule");
+      }
     } else if (step === "schedule") {
       go("review");
     } else if (step === "review") {
@@ -666,6 +739,43 @@ export function FlowWizardModal() {
                     <h2 className="text-base font-semibold text-foreground">BigQuery destination</h2>
                     <p className="text-sm text-muted-foreground mt-0.5">Where should the data land in BigQuery?</p>
                   </div>
+
+                  {bqError && (
+                    <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 dark:bg-rose-950/20 p-3 text-sm text-rose-700 dark:text-rose-400">
+                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" /> {bqError}
+                    </div>
+                  )}
+
+                  {bqConfigured === false && !bqVerified && (
+                    <div className="space-y-3 rounded-xl border-2 border-border p-3.5">
+                      <div className="flex items-center gap-2">
+                        <div className="h-7 w-7 rounded-lg flex items-center justify-center bg-blue-500 text-white shrink-0">
+                          <Database className="h-3.5 w-3.5" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">Connect BigQuery</p>
+                          <p className="text-[11px] text-muted-foreground">No BigQuery credentials yet for this workspace — connect once here.</p>
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-xs font-medium">Project ID</Label>
+                        <Input value={bqProjectId} onChange={e => setBqProjectId(e.target.value)}
+                          placeholder="my-gcp-project-id" className="mt-1.5 h-9 text-sm" />
+                      </div>
+                      <div>
+                        <Label className="text-xs font-medium">Service Account JSON</Label>
+                        <textarea
+                          value={bqServiceJson}
+                          onChange={e => setBqServiceJson(e.target.value)}
+                          placeholder={'{\n  "type": "service_account",\n  "project_id": "...",\n  ...\n}'}
+                          rows={4}
+                          className="mt-1.5 w-full rounded-lg border border-border bg-white dark:bg-[#0e0f1a] px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
+                        />
+                        <p className="text-[11px] text-muted-foreground mt-1">Google Cloud → IAM → Service Accounts → Create key (JSON). Needs BigQuery Data Editor + Job User roles.</p>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-3">
                     <div>
                       <Label className="text-xs font-medium">Flow name</Label>
@@ -673,7 +783,7 @@ export function FlowWizardModal() {
                         placeholder="e.g. Shopify Orders → BigQuery" className="mt-1.5 h-9 text-sm" />
                     </div>
                     <div>
-                      <Label className="text-xs font-medium">Dataset <span className="text-muted-foreground font-normal">(leave blank to use default from Settings)</span></Label>
+                      <Label className="text-xs font-medium">Dataset <span className="text-muted-foreground font-normal">(leave blank to use workspace default)</span></Label>
                       <Input value={dataset} onChange={e => setDataset(e.target.value)}
                         placeholder="frugal_data" className="mt-1.5 h-9 text-sm" />
                     </div>
@@ -776,12 +886,14 @@ export function FlowWizardModal() {
             <Button variant="outline" size="sm" onClick={handleBack}>
               {step === "source" ? "Cancel" : "Back"}
             </Button>
-            <Button size="sm" disabled={!canContinue || authenticating || creating} onClick={handleNext} className="gap-1.5">
-              {authenticating ? (
+            <Button size="sm" disabled={!canContinue || authenticating || creating || bqTesting} onClick={handleNext} className="gap-1.5">
+              {authenticating || bqTesting ? (
                 <><Loader2 className="h-3.5 w-3.5 animate-spin" />Verifying…</>
               ) : step === "review" ? (
                 <>Create Flow <ChevronRight className="h-3.5 w-3.5" /></>
               ) : step === "auth" && selectedConn?.id !== "csv" ? (
+                <>Verify & Continue <ChevronRight className="h-3.5 w-3.5" /></>
+              ) : step === "dataset" && bqConfigured === false && !bqVerified ? (
                 <>Verify & Continue <ChevronRight className="h-3.5 w-3.5" /></>
               ) : (
                 <>Continue <ChevronRight className="h-3.5 w-3.5" /></>

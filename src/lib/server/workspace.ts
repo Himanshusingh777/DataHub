@@ -122,7 +122,7 @@ export function ensureUserWorkspace(userId: string, name?: string): string {
   // never have had their data migrated on the fast path — always run it.
   const TABLES_WITH_USER_ID: string[] = [
     "flows", "credentials", "webhooks", "saved_queries",
-    "query_history", "catalog_tables", "automations",
+    "query_history", "catalog_tables",
   ];
   for (const t of TABLES_WITH_USER_ID) {
     try {

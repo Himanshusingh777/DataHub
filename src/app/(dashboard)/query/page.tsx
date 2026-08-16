@@ -4,7 +4,8 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Play, Save, Clock, Database, ChevronDown, Loader2,
   CheckCircle, XCircle, Code2, BookOpen, Download,
-  Lightbulb, History, Star, Trash2,
+  Lightbulb, History, Star, Trash2, Sparkles, AlertCircle,
+  ArrowLeftToLine, RotateCcw,
 } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -85,6 +86,14 @@ export default function QueryStudioPage() {
   const [saveDesc, setSaveDesc]     = useState("");
   const textareaRef                 = useRef<HTMLTextAreaElement>(null);
 
+  // AI SQL Assistant
+  const [aiPanelOpen, setAiPanelOpen]   = useState(false);
+  const [aiPrompt, setAiPrompt]         = useState("");
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiError, setAiError]           = useState<string | null>(null);
+  const [aiSql, setAiSql]               = useState<string | null>(null);
+  const [aiTablesUsed, setAiTablesUsed] = useState<string[]>([]);
+
   // Load saved + history on mount
   useEffect(() => {
     fetch("/api/query/saved").then(r => r.json()).then((d: { queries: SavedQuery[] }) => setSaved(d.queries ?? [])).catch(() => {});
@@ -139,6 +148,37 @@ export default function QueryStudioPage() {
   async function handleDelete(id: string) {
     await fetch(`/api/query/saved/${id}`, { method: "DELETE" });
     setSaved(prev => prev.filter(q => q.id !== id));
+  }
+
+  async function generateAiSql() {
+    if (!aiPrompt.trim() || aiGenerating) return;
+    setAiGenerating(true);
+    setAiError(null);
+    setAiSql(null);
+    try {
+      const res = await fetch("/api/query/ai-generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: aiPrompt.trim() }),
+      });
+      const data = await res.json() as { ok: boolean; sql?: string; tablesUsed?: string[]; error?: string };
+      if (!data.ok) {
+        setAiError(data.error ?? "Could not generate SQL.");
+        return;
+      }
+      setAiSql(data.sql ?? "");
+      setAiTablesUsed(data.tablesUsed ?? []);
+    } catch {
+      setAiError("Network error — could not reach the AI SQL Assistant.");
+    } finally {
+      setAiGenerating(false);
+    }
+  }
+
+  function insertAiSql() {
+    if (!aiSql) return;
+    setSql(aiSql);
+    textareaRef.current?.focus();
   }
 
   function exportCSV() {
@@ -197,6 +237,17 @@ export default function QueryStudioPage() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setAiPanelOpen(v => !v)}
+            className={`flex items-center gap-1.5 text-xs border rounded-md px-3 py-1.5 transition-colors ${
+              aiPanelOpen
+                ? "border-indigo-500 text-indigo-300 bg-indigo-500/10"
+                : "border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-500"
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            AI SQL Assistant
+          </button>
           <button
             onClick={() => setSaveModal(true)}
             className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-md px-3 py-1.5 transition-colors"
@@ -419,6 +470,92 @@ export default function QueryStudioPage() {
             </div>
           </div>
         </div>
+
+        {/* AI SQL Assistant panel */}
+        {aiPanelOpen && (
+          <div className="w-96 border-l border-zinc-800 bg-zinc-900 flex flex-col shrink-0 overflow-hidden">
+            <div className="px-3 py-2.5 border-b border-zinc-800 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">AI SQL Assistant</p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+              <div>
+                <label className="text-[10px] text-zinc-500 block mb-1.5">
+                  Describe what you want in plain English — grounded live in your real warehouse schema and Semantic Models.
+                </label>
+                <textarea
+                  value={aiPrompt}
+                  onChange={e => setAiPrompt(e.target.value)}
+                  onKeyDown={e => {
+                    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); generateAiSql(); }
+                  }}
+                  rows={4}
+                  placeholder={'e.g. "Show total revenue by month"\n"Top 10 customers by sales"\n"Average order value by country"'}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 resize-none outline-none focus:border-indigo-500 placeholder:text-zinc-600"
+                />
+              </div>
+
+              <button
+                onClick={generateAiSql}
+                disabled={!aiPrompt.trim() || aiGenerating}
+                className="flex items-center justify-center gap-2 w-full px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors"
+              >
+                {aiGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                {aiGenerating ? "Generating…" : "Generate SQL"}
+              </button>
+
+              {aiError && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-900/50 bg-red-950/30 px-3 py-2.5 text-xs text-red-300">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>{aiError}</span>
+                </div>
+              )}
+
+              {aiSql && !aiGenerating && (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Generated SQL</p>
+                    {aiTablesUsed.length > 0 && (
+                      <p className="text-[9px] text-zinc-600 truncate max-w-[180px]" title={aiTablesUsed.join(", ")}>
+                        using {aiTablesUsed.length} table{aiTablesUsed.length === 1 ? "" : "s"}
+                      </p>
+                    )}
+                  </div>
+                  <pre className="text-[11px] font-mono text-zinc-300 bg-zinc-950 border border-zinc-800 rounded-lg p-3 whitespace-pre-wrap break-all max-h-64 overflow-y-auto">
+                    {aiSql}
+                  </pre>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={insertAiSql}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition-colors"
+                    >
+                      <ArrowLeftToLine className="w-3.5 h-3.5" />
+                      Insert into Editor
+                    </button>
+                    <button
+                      onClick={generateAiSql}
+                      disabled={aiGenerating}
+                      title="Regenerate"
+                      className="flex items-center justify-center px-2.5 py-1.5 rounded-md border border-zinc-700 hover:border-zinc-500 text-zinc-400 hover:text-white transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!aiSql && !aiError && !aiGenerating && (
+                <div className="flex-1 flex items-center justify-center text-center text-zinc-600 text-xs py-8">
+                  <div>
+                    <Sparkles className="w-6 h-6 mx-auto mb-2 opacity-30" />
+                    Ask a question and I&apos;ll write the SQL — using only the tables that actually exist in your workspace.
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Save modal */}

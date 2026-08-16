@@ -68,7 +68,7 @@ function FlowCard({
     setSyncResult(null);
     try {
       if (isDemo) {
-        await new Promise(r => setTimeout(r, 1200));
+        await new Promise(r => setTimeout(r, 500));
         setSyncResult("success");
         toast.success("Sync complete", `${flow.source.name} → ${flow.destination.name}`);
       } else {

@@ -109,7 +109,7 @@ function CreateKeyModal({ onClose, onCreate }: {
   async function handleCreate() {
     if (!name.trim() || scopes.size === 0) return;
     setCreating(true);
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, 300));
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     const rawKey = `ct_${env === "production" ? "live" : env === "staging" ? "stg" : "test"}_` + Array.from({ length: 32 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
     const newKey: ApiKey = {

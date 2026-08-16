@@ -78,7 +78,7 @@ const NAME_RULES: [RegExp, SemanticClass][] = [
   [/(total|sub)?_?(price|amount|cost|spend|budget|fee|charge)/i, "amount"],
   [/currency/i, "currency"],
   [/_rate$|rate_|percent|pct|ratio/i, "percentage"],
-  [/(^|_)(count|qty|quantity|num_|total_\w+s$)/i, "count"],
+  [/(^|_)(count|qty|quantity)($|_)|(^|_)num_|total_\w+s$/i, "count"],
   [/unsubscribe/i, "unsubscribe"],
   [/bounce/i, "bounce"],
   [/(^|_)open(ed|s)?($|_)/i, "open"],

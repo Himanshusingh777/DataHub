@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthContext } from "@/lib/server/auth-utils";
 import { getDb } from "@/lib/server/db";
+import { syncModelFromSavedQuery } from "@/lib/server/models-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     UPDATE saved_queries SET name=COALESCE(?,name), description=COALESCE(?,description),
     sql=COALESCE(?,sql), updated_at=? WHERE id=? AND workspace_id=?
   `).run(body.name ?? null, body.description ?? null, body.sql ?? null, Date.now(), id, workspaceId);
+
+  const updated = db.prepare("SELECT name, description, sql FROM saved_queries WHERE id = ?").get(id) as
+    { name: string; description: string | null; sql: string };
+  syncModelFromSavedQuery({
+    db, workspaceId, userId, savedQueryId: id,
+    name: updated.name, description: updated.description, sql: updated.sql,
+  });
 
   return NextResponse.json({ ok: true });
 }
