@@ -26,17 +26,24 @@ let _pool: Pool | null = null;
 
 function getPool(): Pool {
   if (_pool) return _pool;
-  const connectionString = process.env.POSTGRES_URL;
-  // Supabase's pooler presents a cert chain Node's default trust store
-  // doesn't recognize ("self-signed certificate in certificate chain") —
-  // the connection itself is still encrypted, this only skips validating
-  // the cert against a CA, which is the standard accepted tradeoff for
-  // managed Postgres poolers reached over a private/trusted network path.
-  const sslConfig = connectionString?.includes("sslmode=disable") ? undefined : { rejectUnauthorized: false };
-  if (!connectionString) {
+  const raw = process.env.POSTGRES_URL;
+  if (!raw) {
     throw new Error("POSTGRES_URL is not set — cannot connect to the database.");
   }
-  _pool = new Pool({ connectionString, max: 5, ssl: sslConfig });
+  // Supabase's pooler presents a cert chain Node's default trust store
+  // doesn't recognize ("self-signed certificate in certificate chain"). The
+  // connection itself is still encrypted, this only skips validating the
+  // cert against a CA — the standard tradeoff for managed Postgres poolers.
+  //
+  // pg's own connection-string parser reads `sslmode` out of the URL and
+  // that parsed value OVERRIDES a separately-passed `ssl` option (a known
+  // pg gotcha — the string-derived config wins the merge), so passing
+  // `ssl: { rejectUnauthorized: false }` alongside a `sslmode=require` URL
+  // silently has no effect. Rewriting to `sslmode=no-verify` — which pg's
+  // parser maps directly to `{ rejectUnauthorized: false }` — avoids that
+  // conflict entirely by letting the string be the single source of truth.
+  const connectionString = raw.replace(/sslmode=require/i, "sslmode=no-verify");
+  _pool = new Pool({ connectionString, max: 5, ssl: { rejectUnauthorized: false } });
   return _pool;
 }
 
